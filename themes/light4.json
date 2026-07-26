@@ -1,0 +1,39 @@
+{
+    "theme_name": "light4",
+    "app_color": {
+        "light_one": "#ffffff",
+        "light_two": "#f0fdf4",
+        "light_three": "#dcfce7",
+        "light_four": "#bbf7d0",
+
+        "dark_one": "#ffffff",
+        "dark_two": "#f0fdf4",
+        "dark_three": "#dcfce7",
+        "dark_four": "#bbf7d0",
+
+        "bg_one": "#f0fdf4",
+        "bg_two": "#ffffff",
+        "bg_three": "#ecfdf5",
+
+        "icon_color": "#6b7280",
+        "icon_hover": "#047857",
+        "icon_pressed": "#065f46",
+        "icon_active": "#059669",
+
+        "context_color": "#059669",
+        "context_hover": "#047857",
+        "context_pressed": "#065f46",
+
+        "text_title": "#1f2937",
+        "text_foreground": "#374151",
+        "text_description": "#6b7280",
+        "text_active": "#059669",
+
+        "black": "#000000",
+        "white": "#ffffff",
+        "pink": "#ec4899",
+        "green": "#22c55e",
+        "red": "#ef4444",
+        "yellow": "#f59e0b"
+    }
+}

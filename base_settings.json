@@ -1,0 +1,66 @@
+{
+    "app_name": "AnyEIS",
+    "version": "v1.0.0",
+    "copyright": "By: ZHANG AN",
+    "year": 2024,
+    "theme_name": "light6",
+    "language": "zh",
+    "working_path": "E:/Research/AnyEIS/AnyEIS4_test",
+    "custom_title_bar": true,
+    "startup_size": [
+        1600,
+        900
+    ],
+    "minimum_size": [
+        960,
+        540
+    ],
+    "left_menu_size": {
+        "minimum": 50,
+        "maximum": 240
+    },
+    "left_menu_content_margins": 1,
+    "left_column_size": {
+        "minimum": 0,
+        "maximum": 240
+    },
+    "right_column_size": {
+        "minimum": 0,
+        "maximum": 350
+    },
+    "top_settings": {
+        "paths": {
+            "pending_data": "E:/Research/AnyEIS/AnyEIS4_test/Results",
+            "reference_data": "E:/Research/AnyEIS/AnyEIS4_test/reference_data",
+            "results_data": "E:/Research/AnyEIS/AnyEIS4_test/results_data"
+        },
+        "export_image": {
+            "format": "svg",
+            "resolution": 100,
+            "formats_available": [
+                "png",
+                "jpg",
+                "svg",
+                "pdf"
+            ]
+        },
+        "user_preferences": {
+            "interface_layout": "default",
+            "auto_save": false
+        }
+    },
+    "time_animation": 600,
+    "font": {
+        "family": "Arial",
+        "title_size": 14,
+        "text_size": 16,
+        "text_size_normal": 16,
+        "text_size_large": 18,
+        "text_size_small": 14,
+        "text_size_utralsmall": 12,
+        "font_weight_ultralbold": 700,
+        "font_weight_bold": 600,
+        "font_weight_normal": 400,
+        "font_weight_light": 300
+    }
+}

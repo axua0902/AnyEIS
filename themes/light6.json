@@ -1,0 +1,113 @@
+{
+    "theme_name": "light6",
+    "app_color": {
+        "light_one": "#F5F7FA",
+        "light_two": "#FFFFFF",
+        "light_three": "#E6EAEF",
+        "light_four": "#D8E0E9",
+
+        "dark_one": "#EBF2FC",
+        "dark_two": "#303133",
+        "dark_three": "#606266",
+        "dark_four": "#909399",
+
+        "bg_one": "#F5F7FA",
+        "bg_two": "#FFFFFF",
+        "bg_three": "#EBF2FC",
+        "bg_four": "#F0F7FF",
+        "bg_menu": "#FEFAF5",
+
+        "icon_color": "#606266",
+        "icon_hover": "#2590FF",
+        "icon_pressed": "#0064D8",
+        "icon_active": "#0078FF",
+
+        "context_color": "#0078FF",
+        "context_hover": "#2590FF",
+        "context_pressed": "#0064D8",
+
+        "text_title": "#1A1A1A",
+        "text_foreground": "#303133",
+        "text_description": "#606266",
+        "text_active": "#0078FF",
+
+        "black": "#000000",
+        "white": "#FFFFFF",
+        "pink": "#F43F5E",
+        "green": "#10B981",
+        "red": "#F43F5E",
+        "yellow": "#F59E0B",
+        "blue": "#55B9F4",
+        "orange": "#D06E29",
+
+        "blue_primary": "#55B9F4",
+        "blue_hover": "#2590FF",
+        "blue_pressed": "#0064D8",
+
+        "red_primary": "#F43F5E",
+        "red_hover": "#F87171",
+        "red_pressed": "#DC2626",
+
+        "gray_primary": "#606266",
+        "gray_hover": "#909399",
+        "gray_pressed": "#303133",
+
+        "green_primary": "#10B981",
+        "green_hover": "#34D399",
+        "green_pressed": "#059669",
+
+        "dark_blue": "#0056b3",
+        "dark_blue_hover": "#0078FF",
+        "dark_blue_pressed": "#004494",
+
+        "light_blue": "#4dabf7",
+        "light_blue_hover": "#74c0fc",
+        "light_blue_pressed": "#339af0",
+
+        "purple_blue": "#6610f2",
+        "purple_blue_hover": "#7c3aed",
+        "purple_blue_pressed": "#5b21b6",
+        
+        "input_bg": "#FFFFFF",
+        "input_border": "#E6EAEF",
+
+        "btn_primary": "#007bff",
+        "btn_primary_hover": "#0056b3",
+        "btn_primary_pressed": "#004085",
+
+        "btn_secondary": "#6c757d",
+        "btn_secondary_hover": "#5a6268",
+        "btn_secondary_pressed": "#495057",
+
+        "btn_success": "#28a745",
+        "btn_success_hover": "#218838",
+        "btn_success_pressed": "#1e7e34",
+
+        "btn_info": "#17a2b8",
+        "btn_info_hover": "#138496",
+        "btn_info_pressed": "#117a8b",
+
+        "btn_danger": "#dc3545",
+        "btn_danger_hover": "#c82333",
+        "btn_danger_pressed": "#bd2130",
+
+        "btn_purple": "#6610f2",
+        "btn_purple_hover": "#510dc2",
+        "btn_purple_pressed": "#4309a6",
+
+        "btn_light": "#f8f9fa",
+        "btn_light_hover": "#e2e6ea",
+        "btn_light_pressed": "#dae0e5",
+
+        "btn_accent_pink": "#F43F5E",
+        "btn_accent_green": "#10B981",
+        "btn_accent_yellow": "#F59E0B",
+        "btn_accent_blue": "#55B9F4",
+        "btn_accent_orange": "#D06E29",
+
+        "btn_red_light": "#F87171",
+        "btn_green_light": "#34D399"
+
+
+    }
+}

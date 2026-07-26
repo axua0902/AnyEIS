@@ -1,0 +1,44 @@
+{
+    "version": "1.0",
+    "model_type": "MT",
+    "model_name": "MT_20260615_180103",
+    "file_path": "C:\\Users\\zhang an\\Desktop\\Research\\AnyEIS\\AnyEIS4_SoftwareX\\ModelFileExamples\\MT\\MT_20260615_180103.json",
+    "created_date": "2026-06-15",
+    "frequency": {
+        "min": 10.0,
+        "max": 1000000000.0,
+        "distribution": "Log",
+        "unit": "Hz"
+    },
+    "option": {
+        "EP": 0,
+        "DC Conductivity": 0
+    },
+    "model_terms": [
+        {
+            "name": "1",
+            "modeltype": "Debye",
+            "expression": "Deps1/(1+j*omega*Tao1)"
+        }
+    ],
+    "parameters": [
+        {
+            "name": "epsh",
+            "init": 6.0,
+            "min": 0.0,
+            "max": 50.0
+        },
+        {
+            "name": "Deps1",
+            "init": 72.0,
+            "min": 0.0,
+            "max": 100.0
+        },
+        {
+            "name": "Tao1",
+            "init": 8.38e-12,
+            "min": 0.0,
+            "max": 1e-06
+        }
+    ]
+}

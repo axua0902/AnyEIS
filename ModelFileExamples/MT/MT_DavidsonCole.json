@@ -1,0 +1,56 @@
+{
+    "version": "1.0",
+    "model_type": "MT",
+    "model_name": "Davidson-Cole",
+    "file_path": "",
+    "created_date": "2026-06-15",
+    "frequency": {
+        "min": 10.0,
+        "max": 1000000000.0,
+        "distribution": "Log",
+        "unit": "Hz"
+    },
+    "option": {
+        "EP": 0,
+        "DC Conductivity": 1
+    },
+    "model_terms": [
+        {
+            "name": "1",
+            "modeltype": "Davidson-Cole",
+            "expression": "Deps1/(1+j*omega*Tao1)^Beta1"
+        }
+    ],
+    "parameters": [
+        {
+            "name": "epsh",
+            "init": 10.0,
+            "min": 0.0,
+            "max": 100.0
+        },
+        {
+            "name": "sigmaDC",
+            "init": 1e-4,
+            "min": 0.0,
+            "max": 1.0
+        },
+        {
+            "name": "Deps1",
+            "init": 50.0,
+            "min": 0.0,
+            "max": 200.0
+        },
+        {
+            "name": "Tao1",
+            "init": 1e-5,
+            "min": 1e-12,
+            "max": 1e-2
+        },
+        {
+            "name": "Beta1",
+            "init": 0.8,
+            "min": 0.0,
+            "max": 1.0
+        }
+    ]
+}

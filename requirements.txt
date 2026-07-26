@@ -1,0 +1,38 @@
+# AnyEIS Project Dependencies
+# Electrochemical Impedance Spectroscopy Analysis Application
+
+# GUI Framework
+# Provides the Qt-based GUI framework for the application interface
+PySide6>=6.5.0
+
+# Numerical Computing
+# Used for numerical operations, array processing, and mathematical computations
+numpy>=1.24.0
+
+# Data Processing and Analysis
+# Handles data manipulation, DataFrame operations, and data I/O
+pandas>=2.0.0
+
+# Plotting and Visualization
+# Generates plots, charts, and figures for data visualization
+matplotlib>=3.7.0
+
+# Excel File Operations
+# Exports data to Excel format with advanced formatting support
+xlsxwriter>=3.1.0
+
+# Parameter Fitting and Optimization
+# Provides parameter fitting utilities for model optimization (ECM, MT models)
+lmfit>=1.2.0
+
+# Circuit Diagram Drawing
+# Draws electrical circuit diagrams for ECM model visualization
+schemdraw>=0.18.0
+
+# Scientific Computing
+# Performs scientific calculations including signal processing and filtering
+scipy>=1.10.0
+
+# Arbitrary Precision Mathematics
+# Handles special mathematical functions with high precision
+mpmath>=1.3.0
