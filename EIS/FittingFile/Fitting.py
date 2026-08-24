@@ -51,6 +51,63 @@ global globalchosedfileslist
 from setting import Settings  # 应用设置
 from themes import Themes     # 主题颜色
 
+
+# ---------------------------------------------------------------------------
+# 设置字段类型转换工具
+# ---------------------------------------------------------------------------
+# UI 文本框统一返回字符串，但 scipy/lmfit 不同 kwarg 期望 int/float/str/bool。
+# 例如 `maxiter` 应为 int，`no_local_search` 应为 bool，`strategy` 保留 str。
+# 注意 `norm` 是 scipy 的范数阶数（int/float），不是字符串！
+_INT_KEYS = {'maxiter', 'maxfun', 'maxfev', 'popsize', 'niter', 'totaliter',
+             'interval', 'niter_success', 'maxls', 'seed', 'tabulistsize',
+             'maxfunevals'}
+_BOOL_KEYS = {'no_local_search', 'polish', 'adaptive', 'updating',
+              'workers', 'no_local_search'}
+_STR_KEYS = {'strategy', 'visit', 'accept', 'tabustrategy', 'init'}
+# 这些字段若 UI 没填，应丢弃（不能让 None/默认 1e-5 误传到 scipy）
+_NULLABLE_KEYS = {'seed', 'workers', 'init', 'polish'}
+
+# differential_evolution 合法 strategy（scipy.optimize.differential_evolution 校验）
+_DE_STRATEGIES = {
+    'best1bin', 'best1exp', 'rand1bin', 'rand1exp',
+    'best2bin', 'best2exp', 'rand2bin', 'rand2exp',
+    'randtobest1bin', 'randtobest1exp',
+    'currenttobest1bin', 'currenttobest1exp',
+}
+
+
+def _cast_setting(name, val):
+    """
+    根据字段名将 UI 文本框的字符串转换为合适类型。
+    转换失败时回退到原值。
+    """
+    if val is None or (isinstance(val, str) and val.strip() == ''):
+        # 留空：可空字段返回 None，否则用数值兜底
+        if name in _NULLABLE_KEYS:
+            return None
+        return 1e-5
+    try:
+        if name in _INT_KEYS:
+            ival = int(float(val))
+            # maxls 必须为正（scipy 强制 > 0），非法值兜底为 20
+            if name == 'maxls' and ival <= 0:
+                return 20
+            return ival
+        if name in _BOOL_KEYS:
+            if isinstance(val, bool):
+                return val
+            return str(val).strip().lower() in ('1', 'true', 'yes', 'y')
+        if name in _STR_KEYS:
+            sval = str(val)
+            # strategy 必须是 scipy 认可的 DE 策略名，否则兜底为 best1bin
+            if name == 'strategy' and sval not in _DE_STRATEGIES:
+                return 'best1bin'
+            return sval
+        return float(val)
+    except Exception:
+        return val
+
+
 class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
     def __init__(self, parent=None):
         # super(Fitting, self).__init__(parent)
@@ -235,8 +292,23 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         for temp in range(1, row + 1):
             elementname1 = self.tab1.ECMtable.item(temp - 1, 0).text()
             init_val = float(self.tab1.ECMtable.item(temp - 1, 2).text())
-            self.ECMparams[elementname1] = Parameter(elementname1, value=init_val)
-            print(f"[ECMcalculation]   参数: {elementname1} = {init_val}")
+            # 读取 Min/Max（允许空 → 用合理兜底；保证 differential_evolution
+            # 等需要有限边界的优化器能正常运行）
+            try:
+                max_val = float(self.tab1.ECMtable.item(temp - 1, 4).text())
+            except Exception:
+                max_val = 1e15
+            try:
+                min_val = float(self.tab1.ECMtable.item(temp - 1, 5).text())
+            except Exception:
+                min_val = 1e-15
+            # 防止下界 > 上界
+            if min_val >= max_val:
+                min_val, max_val = 1e-15, 1e15
+            self.ECMparams[elementname1] = Parameter(
+                elementname1, value=init_val, min=min_val, max=max_val
+            )
+            print(f"[ECMcalculation]   参数: {elementname1} = {init_val} (min={min_val}, max={max_val})")
         ############### 读取表格数据 生成参数    ################
         
         print(f"[ECMcalculation] prodata数据集数量: {len(prodata)}")
@@ -250,7 +322,7 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                 fit_method = settings.get('method', 'least_squares')
                 for k, v in settings.items():
                     if k != 'method':
-                        fit_kwargs[k] = float(v) if v else 1e-5
+                        fit_kwargs[k] = _cast_setting(k, v)
                 print(f'[ECMcalculation] Fitting settings: method={fit_method}, params={fit_kwargs}')
             except Exception as e:
                 print(f'[ECMcalculation] 读取设置失败，使用默认设置: {e}')
@@ -270,11 +342,21 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                 
                 results = auto_fitting(self.ECMparams, ECMfreq, self.circuit, prodata[i], method=fit_method, **fit_kwargs)  #########智能拟合
                 self.fittedresults.append(results)  ######拟合后结果列表
-                
-                print(f"[ECMcalculation]   拟合结果message: {results.message}")
+
+                # ampgo 等方法 MinimizerResult.message 不可用，需 getattr 兜底
+                msg_attr = getattr(results, 'message', None)
+                if msg_attr is not None:
+                    print(f"[ECMcalculation]   拟合结果message: {msg_attr}")
+                else:
+                    print(f"[ECMcalculation]   拟合结果message: (不可用，ampgo_msg={getattr(results, 'ampgo_msg', None)})")
                 print(f"[ECMcalculation]   拟合参数数量: {len(results.var_names)}")
                 print(f"[ECMcalculation]   拟合参数列表: {list(results.var_names)}")
-                print(f"[ECMcalculation]   拟合结果x: {results.x}")
+                # results.x 在 ampgo 路径上不存在，用 getattr 兜底
+                x_attr = getattr(results, 'x', None)
+                if x_attr is not None:
+                    print(f"[ECMcalculation]   拟合结果x: {x_attr}")
+                else:
+                    print(f"[ECMcalculation]   拟合结果x: (不可用，该方法返回 ampgo_x0={getattr(results, 'ampgo_x0', None)})")
                 
                 fitteddata = FittingresultsprocessECM(self.ECMparams, ECMfreq, self.circuit, results)
                 print(f"[ECMcalculation]   fitteddata类型: {type(fitteddata)}, 长度: {len(fitteddata) if hasattr(fitteddata, '__len__') else 'N/A'}")
@@ -348,7 +430,7 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                 fit_method = settings.get('method', 'least_squares')
                 for k, v in settings.items():
                     if k != 'method':
-                        fit_kwargs[k] = float(v) if v else 1e-5
+                        fit_kwargs[k] = _cast_setting(k, v)
                 print(f'[MTcalculation] Fitting settings: method={fit_method}, params={fit_kwargs}')
             except Exception as e:
                 print(f'[MTcalculation] 读取设置失败，使用默认设置: {e}')
@@ -366,7 +448,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                 results = FittingMT(self.MTparams, MTfreq, self.modelterm, prodata[i], self.option, method=fit_method, **fit_kwargs)
                 self.fittedresults.append(results)  ######拟合后结果列表
                 # print(results)
-                print(results.message)
+                # ampgo 等方法 MinimizerResult.message 不可用，getattr 兜底
+                mt_msg = getattr(results, 'message', None) or getattr(results, 'ampgo_msg', None)
+                print(f"[MTcalculation]   拟合结果message: {mt_msg}")
                 fitteddata = Fittingresultsprocess(self.MTparams, MTfreq, self.modelterm, results, self.option)
                 self.fitteddata.append(fitteddata)  ######拟合后数据列表
                 # outputlist: 原始数据和拟合数据都需要绘制，所以添加[1, 1]
@@ -426,7 +510,11 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         fit_result = self.fittedresults[dataset_index]
         print(f"[processECMResults] fit_result类型: {type(fit_result)}")
         print(f"[processECMResults] fit_result.var_names: {list(fit_result.var_names)}")
-        print(f"[processECMResults] fit_result.x: {fit_result.x}")
+        # ampgo 路径无 result.x，但 lmfit 已把值写入 result.params[par].value
+        fit_x = getattr(fit_result, 'x', None)
+        if fit_x is None:
+            fit_x = [fit_result.params[n].value for n in fit_result.var_names]
+        print(f"[processECMResults] fit_result.x: {fit_x}")
 
         # 设置表头为拟合模型
         self.tab1.setECMTableHeader('fit')
@@ -436,7 +524,7 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         # 写入初始值和拟合结果
         for i in range(len(fit_result.var_names)):
             paramsname = fit_result.var_names[i]
-            fitted_val = fit_result.x[i]
+            fitted_val = fit_x[i]
             print(f"[processECMResults] 处理参数: {paramsname} = {fitted_val}")
 
             # 获取初始值（从ECMtable 的第2列读取）
@@ -501,10 +589,15 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
 
         fit_result = self.fittedresults[dataset_index]
 
+        # ampgo 路径无 result.x，兜底从 params 里取
+        fit_x = getattr(fit_result, 'x', None)
+        if fit_x is None:
+            fit_x = [fit_result.params[n].value for n in fit_result.var_names]
+
         # 写入初始值和拟合结果到MTtable
         for i in range(len(fit_result.var_names)):
             paramsname = fit_result.var_names[i]
-            fitted_val = fit_result.x[i]
+            fitted_val = fit_x[i]
 
             # 获取初始值（从MTtable 的第2列读取）
             init_val = None

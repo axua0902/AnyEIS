@@ -97,15 +97,47 @@ def FittingMT(params,freq,modelterm,prodata,option,method='least_squares',**fit_
     epsData=epsDataRE-1j*sigmaRE
     epsTest=epsData
 
-    # 合并默认参数和用户自定义参数
-    default_kwargs = {
-        'ftol': 1e-10, 'xtol': 1e-10, 'gtol': 1e-10,
-        'loss': 'soft_l1', 'max_nfev': 1e5, 'diff_step': 1e-8
-    }
-    default_kwargs.update(fit_kwargs)
+    # 仅 least_squares 专属，绝不能透传给 minimize/DE/DA/...
+    LS_ONLY = {'ftol', 'xtol', 'gtol', 'tr_solver', 'diff_step'}
+    # 这些方法专有收敛阈值需要塞进 scipy.optimize.minimize 的 options
+    OPTIONS_KEYS = {'xatol', 'fatol', 'xtol', 'ftol', 'gtol', 'maxls',
+                    'maxiter', 'maxfev', 'maxfun', 'eps', 'norm',
+                    'maxcor', 'adaptive', 'iprint', 'finite_diff_rel_step',
+                    'finite_diff_bounds_step', 'direc'}
+
+    # 过滤用户传入的 fit_kwargs，去掉 least_squares 专属项
+    safe_kwargs = {k: v for k, v in fit_kwargs.items() if k not in LS_ONLY}
 
     # Goal function 2: 相对误差形式
-    minner = Minimizer(fcn2min,params,fcn_args=(omega, modelterm,epsTest,option),**default_kwargs)
+    if method == 'least_squares':
+        # `loss` 是 scipy.optimize.least_squares 的合法 kwarg；其他方法不接受
+        minner = Minimizer(
+            fcn2min, params, fcn_args=(omega, modelterm, epsTest, option),
+            **{**safe_kwargs,
+               'ftol': 1e-10, 'xtol': 1e-10, 'gtol': 1e-10,
+               'loss': 'soft_l1', 'max_nfev': int(1e5), 'diff_step': 1e-8}
+        )
+    elif method in ('differential_evolution', 'dual_annealing',
+                    'basinhopping', 'ampgo'):
+        # 进化/全局方法：参数直传给 scipy 对应函数（不接受 options=）
+        # max_nfev 必须是 int（scipy 用作 maxiter）
+        direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
+        direct_kwargs = {k: v for k, v in direct_kwargs.items() if v is not None}
+        minner = Minimizer(
+            fcn2min, params, fcn_args=(omega, modelterm, epsTest, option),
+            **{**direct_kwargs, 'max_nfev': int(1e5)}
+        )
+    else:
+        # 其它走 scipy.optimize.minimize 的方法：所有方法专有收敛阈值必须进 options
+        direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
+        options_kwargs = {k: v for k, v in safe_kwargs.items() if k in OPTIONS_KEYS}
+        direct_kwargs = {k: v for k, v in direct_kwargs.items() if v is not None}
+        options_kwargs = {k: v for k, v in options_kwargs.items() if v is not None}
+        minner = Minimizer(
+            fcn2min, params, fcn_args=(omega, modelterm, epsTest, option),
+            **{**direct_kwargs, 'max_nfev': int(1e5),
+               'options': options_kwargs or None}
+        )
     results = minner.minimize(method=method)
 
     return results
@@ -117,8 +149,12 @@ def FittingMT(params,freq,modelterm,prodata,option,method='least_squares',**fit_
 def Fittingresultsprocess(pm,freq,modelterm,result,option):
     omega=2*pi*freq
 
-    for i in range(0,len(result.var_names)):
-        pm[result.var_names[i]].set(value=result.x[i])
+    # ampgo 路径无 result.x，lmfit 已把值写入 result.params[par].value
+    fit_x = getattr(result, 'x', None)
+    if fit_x is None:
+        fit_x = [result.params[n].value for n in result.var_names]
+    for i, name in enumerate(result.var_names):
+        pm[name].set(value=fit_x[i])
 
     epsfinal=fittingmodel(pm,omega,modelterm,option) 
     results3=creatdatabase(freq,epsfinal)

@@ -127,27 +127,28 @@ class settingUI():
 
         self.METHOD_PARAM_COUNTS = {
             'least_squares': 3,
-            'nelder': 2,
+            'nelder': 3,
             'lbfgsb': 3,
             'differential_evolution': 6,
             'basinhopping': 6,
             'powell': 3,
             'cg': 3,
-            'dual_annealing': 6,
+            'dual_annealing': 3,
             'bfgs': 3,
             'ampgo': 5,
         }
         self.METHOD_PARAM_NAMES = {
             'least_squares': ['xtol', 'ftol', 'gtol'],
-            'nelder': ['xatol', 'fatol'],
+            'nelder': ['xatol', 'fatol', 'maxiter'],
             'lbfgsb': ['ftol', 'gtol', 'maxls'],
             'differential_evolution': ['strategy', 'maxiter', 'popsize', 'tol', 'mutation', 'recombination'],
-            'basinhopping': ['T', 'niter', 'stepsize', 'accept_test', 'boltzmann_temp', 'wik'],
-            'powell': ['xtol', 'ftol', 'maxit'],
+            'basinhopping': ['niter', 'T', 'stepsize', 'interval', 'niter_success', 'seed'],
+            'powell': ['xtol', 'ftol', 'maxiter'],
             'cg': ['gtol', 'norm', 'eps'],
-            'dual_annealing': ['initial_temp', 'restart_temp_ratio', 'visit', 'accept', 'maxiter', 'no_local_search'],
+            'dual_annealing': ['initial_temp', 'restart_temp_ratio', 'maxiter'],
             'bfgs': ['gtol', 'norm', 'eps'],
-            'ampgo': ['iter', 'tol', 'eps', 'maxfun', 'maxiter'],
+            # ampgo 真实参数是 glbtol/eps1/eps2/maxfunevals/totaliter（lmfit 源码）
+            'ampgo': ['glbtol', 'eps1', 'eps2', 'maxfunevals', 'totaliter'],
         }
         self.current_param_count = 3
         self.current_method = 'least_squares'
@@ -157,6 +158,21 @@ class settingUI():
         self.verticalLayout.addWidget(self.settingSection)
 
     def build_param_row(self, param_count, param_names=None):
+        # 字段特定默认值（避免 lbfgsb.maxls/strategy 等收到非法默认值）
+        _DEFAULTS = {
+            'xtol': '1e-10', 'ftol': '1e-10', 'gtol': '1e-10',
+            'xatol': '1e-6', 'fatol': '1e-6', 'maxiter': '5000',
+            'maxls': '20',  # lbfgsb: maxls 必须为正整数，1e-5 会报 "maxls must be positive"
+            'popsize': '15', 'tol': '0.01', 'mutation': '0.5', 'recombination': '0.7',
+            'strategy': 'best1bin',  # DE: 必须是 scipy 认可的策略名
+            'niter': '50', 'T': '1.0', 'stepsize': '0.5',
+            'interval': '10', 'niter_success': '5', 'seed': '',
+            'eps': '1e-8', 'norm': 'inf',
+            'initial_temp': '5230', 'restart_temp_ratio': '2e-5',
+            'glbtol': '1e-5', 'eps1': '0.02', 'eps2': '0.1',
+            'maxfunevals': '5000', 'totaliter': '5',
+        }
+
         while self.paramRowLayout.count() > 0:
             item = self.paramRowLayout.takeAt(0)
             if item.widget():
@@ -164,7 +180,8 @@ class settingUI():
 
         for i in range(1, param_count + 1):
             p_name = param_names[i-1] if param_names and i <= len(param_names) else f'p{i}'
-            p_default = '1e-5'
+            # 字段特定默认值；找不到再回退到 1e-5
+            p_default = _DEFAULTS.get(p_name, '1e-5')
             self.paramRowLayout.addWidget(PyLabel2(
                 text=f"{p_name}:",
                 color=self.themes["app_color"]["text_title"],

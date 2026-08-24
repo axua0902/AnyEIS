@@ -135,9 +135,16 @@ def FittingresultsprocessECM(pm,freq,circuit,result,verbose=False):
     # print(result.message)
     if verbose:
         report_fit(result)
-    
-    for i in range(0,len(result.var_names)):
-        pm[result.var_names[i]].set(value=result.x[i])
+
+    # ampgo 路径下 result.x 不存在，结果存于 result.ampgo_x0；
+    # 其它方法 lmfit 也会把 x 写到 result.params[par].value，所以优先用 params。
+    for i, name in enumerate(result.var_names):
+        x = getattr(result, 'x', None)
+        if x is not None and i < len(x):
+            pm[name].set(value=x[i])
+        else:
+            # ampgo 或其它没 x 的方法：直接用 params 里 lmfit 已写入的值
+            pm[name].set(value=result.params[name].value)
 
 
     Ztotal,Zparallel=simuECM(pm,circuit,freq)
@@ -538,16 +545,53 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
 
         # 执行拟合
         ZData = prodata['Rs[ohm]'].values + 1j * prodata['X[ohm]'].values
-        
-        # 合并默认参数和用户自定义参数
-        default_kwargs = {
-            'ftol': 1e-15, 'xtol': 1e-15, 'gtol': 3e-16,
-            'loss': 'soft_l1', 'max_nfev': 1e5, 'tr_solver': 'lsmr', 'diff_step': 1e-15
-        }
-        default_kwargs.update(fit_kwargs)
-        
-        minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData), **default_kwargs)
-        result = minner.minimize(method=method)
+
+        # 仅 least_squares 专属，绝不能透传给 minimize/DE/DA/...
+        LS_ONLY = {'ftol', 'xtol', 'gtol', 'tr_solver', 'diff_step'}
+        # 这些方法专有收敛阈值需要塞进 scipy.optimize.minimize 的 options
+        OPTIONS_KEYS = {'xatol', 'fatol', 'xtol', 'ftol', 'gtol', 'maxls',
+                        'maxiter', 'maxfev', 'maxfun', 'eps', 'norm',
+                        'maxcor', 'adaptive', 'iprint', 'finite_diff_rel_step',
+                        'finite_diff_bounds_step', 'direc'}
+
+        # 过滤用户传入的 fit_kwargs，去掉 least_squares 专属项
+        safe_kwargs = {k: v for k, v in fit_kwargs.items() if k not in LS_ONLY}
+
+        if method == 'least_squares':
+            # `loss` 是 scipy.optimize.least_squares 的合法 kwarg；其他方法不接受
+            minner = Minimizer(
+                fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                **{**safe_kwargs,
+                   'ftol': 1e-15, 'xtol': 1e-15, 'gtol': 3e-16,
+                   'loss': 'soft_l1', 'max_nfev': int(1e5),
+                   'tr_solver': 'lsmr', 'diff_step': 1e-15}
+            )
+            result = minner.minimize(method='least_squares')
+        elif method in ('differential_evolution', 'dual_annealing',
+                        'basinhopping', 'ampgo'):
+            # 进化/全局方法：参数直传给 scipy 对应函数（不接受 options=）
+            # max_nfev 必须是 int（scipy 用作 maxiter）
+            direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
+            # 过滤掉 None（_cast_setting 对可空字段返回 None，scipy 不接受）
+            direct_kwargs = {k: v for k, v in direct_kwargs.items() if v is not None}
+            minner = Minimizer(
+                fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                **{**direct_kwargs, 'max_nfev': int(1e5)}
+            )
+            result = minner.minimize(method=method)
+        else:
+            # 其它走 scipy.optimize.minimize 的方法：所有方法专有收敛阈值必须进 options
+            direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
+            options_kwargs = {k: v for k, v in safe_kwargs.items() if k in OPTIONS_KEYS}
+            # 过滤掉 None
+            direct_kwargs = {k: v for k, v in direct_kwargs.items() if v is not None}
+            options_kwargs = {k: v for k, v in options_kwargs.items() if v is not None}
+            minner = Minimizer(
+                fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                **{**direct_kwargs, 'max_nfev': int(1e5),
+                   'options': options_kwargs or None}
+            )
+            result = minner.minimize(method=method)
 
         return {
             'result': result,
@@ -577,8 +621,15 @@ def auto_fitting(params, freq, circuit, prodata, method='least_squares', **fit_k
     init_params = {}
     for name, param in params.items():
         init_params[name] = param.value
-        init_params[f'{name}_min'] = param.min
-        init_params[f'{name}_max'] = param.max
+        # 收紧 ±inf 兜底，避免 differential_evolution/dual_annealing/basinhopping 抛
+        # 'requires finite bound for all varying parameters'
+        pmin = param.min if np.isfinite(param.min) else 1e-15
+        pmax = param.max if np.isfinite(param.max) else 1e15
+        # 防止下界 > 上界
+        if pmin >= pmax:
+            pmin, pmax = 1e-15, 1e15
+        init_params[f'{name}_min'] = pmin
+        init_params[f'{name}_max'] = pmax
 
     # 调用核心函数
     result_dict = _auto_fitting_core(freq, prodata, circuit, init_params, method=method, **fit_kwargs)
