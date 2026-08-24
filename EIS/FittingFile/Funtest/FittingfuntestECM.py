@@ -2,6 +2,11 @@
 """
 EIS 等效电路拟合测试套件 - 复杂电路与极限条件测试
 
+> **DEPRECATED**：
+> 推荐使用 [test_all_methods.py](test_all_methods.py) 作为统一测试入口。
+> 本文件保留为单独测试复杂电路和极限条件的旧版脚本，
+> 所有函数已添加 `method` 参数以支持 10 种优化方法。
+
 测试策略：
 1. 基础串联/并联电路已验证通过，本文件聚焦于复杂电路和已知失败场景
 2. 展示拟合能力的边界，暴露已知的局限性
@@ -21,6 +26,7 @@ EIS 等效电路拟合测试套件 - 复杂电路与极限条件测试
 
 Created on 2026-06-06
 @author: takeilab
+Updated on 2026-08-24: 添加 method 参数 + 与 test_all_methods 同步
 """
 
 import sys
@@ -79,6 +85,10 @@ def evaluate_and_print(result, true_params, title=""):
     print(f"{title}")
     print(f"{'='*70}")
     print(f"拟合成功: {result.success}")
+    # ampgo 等方法没有 result.message / result.x
+    msg = getattr(result, 'message', None) or getattr(result, 'ampgo_msg', None)
+    if msg is not None:
+        print(f"拟合消息: {msg}")
 
     print(f"\n{'参数':<10} {'拟合值':<14} {'真值':<14} {'相对误差':<10} {'状态'}")
     print("-" * 65)
@@ -132,7 +142,7 @@ def evaluate_and_print(result, true_params, title=""):
 # 测试：复杂电路（串并联混合，元件数 > 3）
 # =============================================================================
 
-def test_complex_mixed_circuits():
+def test_complex_mixed_circuits(method='least_squares'):
     """
     测试复杂串并联混合电路
     电路结构: R + p(C, R) + p(C, R) + C
@@ -141,6 +151,7 @@ def test_complex_mixed_circuits():
     print("\n" + "="*70)
     print("测试: 复杂串并联混合电路 (4元件)")
     print("电路: R1 + p(C1, R2) + p(C3, R4) + R5")
+    print(f"方法: {method}")
     print("="*70)
 
     # 定义电路参数
@@ -176,7 +187,7 @@ def test_complex_mixed_circuits():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e12)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "复杂串并联混合电路结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -185,13 +196,14 @@ def test_complex_mixed_circuits():
     return rating, max_error
 
 
-def test_four_element_circuit():
+def test_four_element_circuit(method='least_squares'):
     """
     测试4元件电路: R1 + p(C1, R2) + R3
     这是最复杂的可可靠拟合的电路结构
     """
     print("\n" + "="*70)
     print("测试: 4元件电路 R1 + p(C1, R2) + R3")
+    print(f"方法: {method}")
     print("="*70)
 
     true_params = {'R1': 100.0, 'C1': 1e-6, 'R2': 500.0, 'R3': 50.0}
@@ -210,7 +222,7 @@ def test_four_element_circuit():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e12)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, is_ok = evaluate_and_print(result, true_params, "4元件电路结果")
 
     print(f"\n结论: {'可接受' if is_ok else '失败'} (最大误差 {max_error:.2f}%)")
@@ -221,7 +233,7 @@ def test_four_element_circuit():
 # 测试：多并联分支电路（预期失败）
 # =============================================================================
 
-def test_multi_parallel_branches():
+def test_multi_parallel_branches(method='least_squares'):
     """
     测试多并联分支电路 - 预期失败
     电路: R + p(C,R) + p(C,R)
@@ -248,7 +260,7 @@ def test_multi_parallel_branches():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e12)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "多并联分支结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -257,7 +269,7 @@ def test_multi_parallel_branches():
     return rating, max_error
 
 
-def test_triple_parallel():
+def test_triple_parallel(method='least_squares'):
     """
     测试三并联电路: R + p(C,R) + p(C,R) + p(C,R) - 极度危险
     """
@@ -287,7 +299,7 @@ def test_triple_parallel():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e12)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "三并联结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -300,7 +312,7 @@ def test_triple_parallel():
 # 测试：极端参数量级差异
 # =============================================================================
 
-def test_extreme_magnitude_mOhm_to_MOhm():
+def test_extreme_magnitude_mOhm_to_MOhm(method='least_squares'):
     """
     测试极端量级差异: mΩ 到 MΩ
     R1 = 1mΩ, C1 = 1mF, R2 = 1MΩ
@@ -328,7 +340,7 @@ def test_extreme_magnitude_mOhm_to_MOhm():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-15, max=1e15)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "极端量级差异结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -340,7 +352,7 @@ def test_extreme_magnitude_mOhm_to_MOhm():
     return rating, max_error
 
 
-def test_high_resistance_extreme():
+def test_high_resistance_extreme(method='least_squares'):
     """
     测试高阻值极端情况: R2 = 10MΩ
     这种情况下并联电阻在测量范围内可能"不可见"
@@ -366,7 +378,7 @@ def test_high_resistance_extreme():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e15)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "高阻值结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -383,7 +395,7 @@ def test_high_resistance_extreme():
     return rating, max_error
 
 
-def test_low_capacitance_extreme():
+def test_low_capacitance_extreme(method='least_squares'):
     """
     测试低容值极端情况: C1 = 1pF
     特征频率会非常高，可能超出测量范围
@@ -408,7 +420,7 @@ def test_low_capacitance_extreme():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-15, max=1e12)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "低容值结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -428,7 +440,7 @@ def test_low_capacitance_extreme():
 # 测试：宽频率跨度
 # =============================================================================
 
-def test_wide_frequency_span():
+def test_wide_frequency_span(method='least_squares'):
     """
     测试宽频率跨度: 10 数量级
     这对拟合算法是一个挑战
@@ -453,7 +465,7 @@ def test_wide_frequency_span():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e12)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "宽频率跨度结果")
 
     print(f"\n结论: {rating} (最大误差 {max_error:.2f}%)")
@@ -466,7 +478,7 @@ def test_wide_frequency_span():
 # 测试：高噪声环境
 # =============================================================================
 
-def test_high_noise_environment():
+def test_high_noise_environment(method='least_squares'):
     """
     测试高噪声环境 (10% 噪声)
     模拟真实测量条件
@@ -500,7 +512,7 @@ def test_high_noise_environment():
         for name, val in init_params.items():
             pm.add(name, value=val, min=1e-12, max=1e12)
 
-        result = FittingECM(pm, freq, circuit, prodata)
+        result = FittingECM(pm, freq, circuit, prodata, method=method)
 
         max_error = 0
         for name, true_val in true_params.items():
@@ -520,7 +532,7 @@ def test_high_noise_environment():
 # 测试：小电容 + 大电阻组合
 # =============================================================================
 
-def test_small_capacitance_large_resistance():
+def test_small_capacitance_large_resistance(method='least_squares'):
     """
     测试小电容 + 大电阻组合
     特征频率可能非常低，导致参数不可辨识
@@ -546,7 +558,7 @@ def test_small_capacitance_large_resistance():
     for name, val in init_params.items():
         pm.add(name, value=val, min=1e-12, max=1e15)
 
-    result = FittingECM(pm, freq, circuit, prodata)
+    result = FittingECM(pm, freq, circuit, prodata, method=method)
     rating, max_error, _ = evaluate_and_print(result, true_params, "小C大R结果")
 
     f_char = 1 / (2 * pi * true_params['R2'] * true_params['C1'])

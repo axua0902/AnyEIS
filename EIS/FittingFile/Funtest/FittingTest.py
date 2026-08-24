@@ -3,9 +3,12 @@
 r"""
 测试 ECMcalculation 函数的测试文件
 
+> **DEPRECATED**：
+> 推荐使用 [test_all_methods.py](test_all_methods.py) 作为统一测试入口。
+> 本文件保留为单次运行的旧版 smoke test，已修复 ampgo 兼容性。
+
 运行方式:
-    cd c:\Users\zhang an\Desktop\Research\AnyEIS\AnyEIS4_test
-    python -m EIS.FittingFile.Funtest.FittingTest
+    python EIS/FittingFile/Funtest/FittingTest.py
 """
 
 import sys
@@ -14,8 +17,8 @@ import numpy as np
 import pandas as pd
 from pandas import DataFrame, Series
 
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# 添加项目根目录到路径（4 层 dirname 才能从 Funtest/ 退到 AnyEIS/）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 # 导入必要的模块
 from lmfit import Parameters, Parameter
@@ -97,7 +100,9 @@ def test_auto_fitting():
         print(f"\n拟合成功!")
         print(f"  方法: {result.method}")
         print(f"  成功: {result.success}")
-        print(f"  消息: {result.message}")
+        # ampgo 没有 result.message，getattr 兜底
+        msg = getattr(result, 'message', None) or getattr(result, 'ampgo_msg', None)
+        print(f"  消息: {msg}")
         print(f"  拟合参数:")
         for name in result.var_names:
             print(f"    {name} = {result.params[name].value:.6e}")
@@ -360,7 +365,9 @@ def test_MTcalculation():
         print(f"  拟合成功!")
         print(f"    方法: {results.method}")
         print(f"    成功: {results.success}")
-        print(f"    消息: {results.message}")
+        # ampgo 没有 result.message
+        msg = getattr(results, 'message', None) or getattr(results, 'ampgo_msg', None)
+        print(f"    消息: {msg}")
         print(f"    拟合参数:")
         for name in results.var_names:
             print(f"      {name} = {results.params[name].value:.6e}")

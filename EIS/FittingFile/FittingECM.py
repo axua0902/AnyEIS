@@ -110,21 +110,25 @@ def fcn2min(params, freq, circuit, ZDataTest):
 
 
 
-def FittingECM(params,freq,circuit,prodata):
+def FittingECM(params, freq, circuit, prodata, method='least_squares', **fit_kwargs):
+    """
+    兼容旧 API 的拟合函数 - 已委托给 auto_fitting
 
-    # omega=2*pi*freq
-    ZRE=prodata['Rs[ohm]']
-    ZIM=prodata['X[ohm]']
-    
-    ZData=ZRE+1j*ZIM
+    原 FittingECM 硬编码 method='least_squares'，且 ftol/xtol/gtol 硬塞；
+    现改为委托给 auto_fitting，可支持全部 10 个优化方法。
 
-    ZDataTest=ZData
+    参数:
+        params: lmfit Parameters 对象
+        freq: 频率数组
+        circuit: 电路描述列表
+        prodata: 包含 'Rs[ohm]' 和 'X[ohm]' 的 DataFrame
+        method: 优化算法名称（默认 'least_squares'）
+        **fit_kwargs: 其他拟合参数
 
-    minner = Minimizer(fcn2min,params,fcn_args=(freq, circuit,ZDataTest),ftol=1e-15,xtol=1e-15,gtol=3e-16,loss='soft_l1',max_nfev=1e5,tr_solver='lsmr',diff_step=1e-15)
-    results = minner.minimize(method='least_squares')
-
-    print(results.success)
-    return results
+    返回:
+        lmfit Result 对象
+    """
+    return auto_fitting(params, freq, circuit, prodata, method=method, **fit_kwargs)
 
 
 def FittingresultsprocessECM(pm,freq,circuit,result,verbose=False):

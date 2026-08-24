@@ -2,6 +2,11 @@
 """
 EIS 等效电路拟合测试套件 - 极端条件与策略验证
 
+> **DEPRECATED**：
+> 推荐使用 [test_all_methods.py](test_all_methods.py) 作为统一测试入口。
+> 本文件保留为单独测试策略选择和决策函数的旧版脚本，
+> `test_auto_fitting_edge_cases` 已添加 `methods` 参数。
+
 本文件聚焦于：
 1. 决策函数验证（should_use_segmented, should_use_extreme）
 2. 参数可辨识性检查（check_parameter_identifiability）
@@ -16,6 +21,7 @@ EIS 等效电路拟合测试套件 - 极端条件与策略验证
 
 Created on 2026-06-06
 @author: takeilab
+Updated on 2026-08-24: 添加 methods 参数 + 与 test_all_methods 同步
 """
 
 import sys
@@ -384,12 +390,17 @@ def test_smart_fitting_strategy_selection():
 # 测试：auto_fitting 边界条件
 # =============================================================================
 
-def test_auto_fitting_edge_cases():
+def test_auto_fitting_edge_cases(methods=None):
     """
     测试 auto_fitting 在边界条件下的表现
+    methods: 列表，可指定多种方法对比
     """
+    if methods is None:
+        methods = ['least_squares']
+
     print("\n" + "="*70)
     print("测试: auto_fitting 边界条件")
+    print(f"方法: {methods}")
     print("="*70)
 
     cases = [
@@ -416,34 +427,37 @@ def test_auto_fitting_edge_cases():
         },
     ]
 
-    print(f"\n{'场景':<20} {'拟合成功':<10} {'最大误差':<12} {'评级'}")
-    print("-" * 60)
+    # 表头：场景 + 每个方法的误差
+    header = f"{'场景':<20}"
+    for m in methods:
+        header += f"  {m:>16s}"
+    print(f"\n{header}")
+    print('-' * (20 + 18 * len(methods)))
 
     results = []
     for tc in cases:
         freq = logspace(*tc['freq_range'], 150)
         prodata, _ = create_test_data(tc['circuit'], tc['true_params'], freq)
+        row = f"{tc['name']:<20}"
+        for m in methods:
+            pm = Parameters()
+            for name, val in tc['init_params'].items():
+                pm.add(name, value=val, min=1e-15, max=1e15)
+            try:
+                result = auto_fitting(pm, freq, tc['circuit'], prodata, method=m)
 
-        pm = Parameters()
-        for name, val in tc['init_params'].items():
-            pm.add(name, value=val, min=1e-15, max=1e15)
+                max_error = 0
+                for name, true_val in tc['true_params'].items():
+                    fit_val = result.params.get(name).value
+                    rel_error = abs((fit_val - true_val) / true_val) * 100
+                    max_error = max(max_error, rel_error)
 
-        try:
-            result = auto_fitting(pm, freq, tc['circuit'], prodata)
-
-            max_error = 0
-            for name, true_val in tc['true_params'].items():
-                fit_val = result.params.get(name).value
-                rel_error = abs((fit_val - true_val) / true_val) * 100
-                max_error = max(max_error, rel_error)
-
-            quality = "优秀" if max_error < 5 else ("良好" if max_error < 20 else "一般" if max_error < 100 else "较差")
-            success_str = "是" if result.success else "否"
-            print(f"{tc['name']:<20} {success_str:<10} {max_error:>10.2f}%   {quality}")
-            results.append((tc['name'], result.success, max_error))
-        except Exception as e:
-            print(f"{tc['name']:<20} {'否':<10} {'N/A':<12}   崩溃: {str(e)[:30]}")
-            results.append((tc['name'], False, float('inf')))
+                quality = "优" if max_error < 5 else ("良" if max_error < 20 else ("中" if max_error < 100 else "差"))
+                row += f"  {f'{max_error:.1f}%({quality})':>16s}"
+            except Exception as e:
+                row += f"  {'ERR':>16s}"
+        print(row)
+        results.append((tc['name'], row))
 
     return results
 
@@ -694,7 +708,10 @@ def run_all_tests():
     print("=" + " "*20 + "auto_fitting 边界条件" + " "*32 + "=")
     print("="*70)
 
-    results['边界条件'] = test_auto_fitting_edge_cases()
+    # 多方法对比：least_squares + lbfgsb + differential_evolution
+    results['边界条件'] = test_auto_fitting_edge_cases(
+        methods=['least_squares', 'lbfgsb', 'differential_evolution']
+    )
 
     # 6. fit_extreme 效果对比
     print("\n\n" + "="*70)
