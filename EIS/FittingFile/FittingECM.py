@@ -484,6 +484,219 @@ def should_use_extreme(freq, init_params):
         return False, f"参数可辨识，无极端条件"
 
 
+# =============================================================================
+# 全局方法边界自适应 + 多起点 R1 约束
+# （P0-① 自适应边界 / P0-② 局部方法保留原边界 / P1 多起点 + 物理约束）
+# =============================================================================
+
+# 全局优化方法集合（与 _auto_fitting_core 中的判断保持一致）
+GLOBAL_METHODS = {'differential_evolution', 'dual_annealing',
+                  'basinhopping', 'ampgo'}
+
+
+def _compute_adaptive_bounds(init_value, method,
+                              user_min=None, user_max=None,
+                              tighten_factor=1000.0):
+    """
+    为不同方法计算合适的参数边界
+
+    规则:
+        1. 局部方法 (least_squares/nelder/lbfgsb/powell/cg/bfgs):
+           完全保留原行为 —— 1e-15 ~ 1e15 或用户显式设置
+        2. 全局方法 (DE/DA/BH/AMPGO):
+           - 如果用户显式设置了更紧的边界，沿用用户设置
+           - 否则自动收紧到 [init/tighten, init*tighten]
+             默认 tighten=1000, 即 ±3 个数量级
+        3. init 必须为正；非正时回退到 1e-6
+
+    参数:
+        init_value: 参数初值
+        method: 优化方法名
+        user_min: 用户显式下界（None 表示未设置）
+        user_max: 用户显式上界（None 表示未设置）
+        tighten_factor: 全局方法的收紧系数（默认 1000）
+
+    返回:
+        (min_val, max_val)
+    """
+    # 局部方法：完全保留原行为
+    if method not in GLOBAL_METHODS:
+        return (1e-15 if user_min is None else user_min,
+                1e15  if user_max is None else user_max)
+
+    # 全局方法：init 必须为正
+    if init_value <= 0 or not np.isfinite(init_value):
+        init_value = 1e-6
+
+    # 自适应边界
+    auto_min = init_value / tighten_factor
+    auto_max = init_value * tighten_factor
+
+    # 用户边界 vs 自适应边界：取更紧的（覆盖范围更小的）
+    final_min = max(user_min, auto_min) if user_min is not None else auto_min
+    final_max = min(user_max, auto_max) if user_max is not None else auto_max
+
+    # 防护: 防止下界 > 上界
+    if final_min >= final_max:
+        final_min, final_max = auto_min, auto_max
+
+    # 兜底: 绝不超过 1e-15 ~ 1e15 的全局安全范围
+    final_min = max(final_min, 1e-15)
+    final_max = min(final_max, 1e15)
+
+    return (final_min, final_max)
+
+
+def _should_use_multi_start(init_params, method, freq=None):
+    """
+    判断全局方法是否需要多起点 + R1 物理约束
+
+    触发条件（任一满足）:
+        1. 全局方法 AND
+        2. 电路有 ≥ 2 个 R* 参数（暗示有多个并联分支） OR
+           参数量级差异 > 5 个数量级
+
+    参数:
+        init_params: 初始参数字典
+        method: 优化方法名
+        freq: 频率数组（暂未使用，预留）
+
+    返回:
+        bool
+    """
+    if method not in GLOBAL_METHODS:
+        return False
+
+    # 条件 1: 多个 R* 参数（暗示有多个并联分支 → 多解性高风险）
+    R_count = sum(1 for k in init_params
+                  if k.startswith('R') and not k.endswith('_min')
+                  and not k.endswith('_max'))
+    if R_count >= 2:
+        return True
+
+    # 条件 2: 参数量级差异 > 5 个数量级
+    param_vals = [v for k, v in init_params.items()
+                  if not k.endswith('_min') and not k.endswith('_max')
+                  and v > 0 and np.isfinite(v)]
+    if len(param_vals) >= 2:
+        mag_diff = np.log10(max(param_vals)) - np.log10(min(param_vals))
+        if mag_diff > 5:
+            return True
+
+    return False
+
+
+def _multi_start_with_R1_constraint(freq, prodata, circuit, init_params,
+                                      method, n_starts=10, r1_tighten=10.0,
+                                      rng_seed=42):
+    """
+    多起点 + R1_est 物理约束的全局搜索（用于多解性/极值量级场景）
+
+    步骤:
+        1. 从高频段估计 R1_est（复用 segmented_fitting 的思路）
+        2. 找到第一个 R* 参数作为 R1
+        3. 在 R1_est 周围 [R1_est/r1_tighten, R1_est*r1_tighten] 内
+           对数空间均匀采样 n_starts 个起点
+        4. 每个起点跑一次 method,选择 χ² 最小的结果
+
+    参数:
+        freq: 频率数组
+        prodata: 包含 'Rs[ohm]' 和 'X[ohm]' 的 DataFrame
+        circuit: 电路描述列表
+        init_params: 初始参数字典（可含 _min/_max 后缀的边界）
+        method: 全局优化方法名
+        n_starts: 起点数量（默认 10）
+        r1_tighten: R1 边界相对 R1_est 的倍数（默认 10 即 ±1 数量级）
+        rng_seed: 随机种子（保证可复现）
+
+    返回:
+        lmfit Result 对象（如果全部失败则返回 None）
+    """
+    ZData = prodata['Rs[ohm]'].values + 1j * prodata['X[ohm]'].values
+    f_min, f_max = freq.min(), freq.max()
+
+    # Step 1: 高频段估计 R1
+    high_mask = freq > f_max / 10
+    if np.sum(high_mask) < 3:
+        high_mask = freq > f_max / 3
+    if np.sum(high_mask) < 3:
+        high_mask = freq > np.sqrt(f_min * f_max)
+    R1_est = float(np.mean(np.real(ZData[high_mask])))
+    if not np.isfinite(R1_est) or R1_est <= 0:
+        # 回退到 init_params 中的 R1 初值
+        R1_est = next((v for k, v in init_params.items()
+                       if k.startswith('R') and not k.endswith('_min')
+                       and not k.endswith('_max')),
+                      1.0)
+    if R1_est <= 0:
+        R1_est = 1.0
+
+    # Step 2: 找到 R1 参数名
+    R_names = sorted([k for k in init_params.keys()
+                      if k.startswith('R') and not k.endswith('_min')
+                      and not k.endswith('_max')])
+    R1_name = R_names[0] if R_names else 'R1'
+    R1_init = init_params.get(R1_name, R1_est)
+
+    # R1 边界: [R1_est/r1_tighten, R1_est*r1_tighten]
+    R1_min = R1_est / r1_tighten
+    R1_max = R1_est * r1_tighten
+    # 包含 R1_init（如果 R1_init 在边界外，使用 R1_init ± 50%）
+    if R1_init < R1_min:
+        R1_min = max(R1_init * 0.5, 1e-15)
+    if R1_init > R1_max:
+        R1_max = R1_init * 1.5
+
+    # Step 3: 在对数空间均匀采样 n_starts 个 R1 起点
+    rng = np.random.default_rng(rng_seed)
+    log_lo = np.log10(max(R1_min, 1e-15))
+    log_hi = np.log10(min(R1_max, 1e15))
+    R1_starts = 10 ** rng.uniform(log_lo, log_hi, size=n_starts)
+    # 保证至少一个起点等于 R1_est
+    R1_starts[0] = R1_est
+
+    # Step 4: 跑 n_starts 次拟合
+    best_result = None
+    best_chisqr = float('inf')
+    print(f"  [多起点模式] method={method}, n_starts={n_starts}, "
+          f"R1_est={R1_est:.3e}, R1_bounds=[{R1_min:.3e}, {R1_max:.3e}]")
+
+    for i, R1_start in enumerate(R1_starts):
+        pm = Parameters()
+        for key, value in init_params.items():
+            if key.endswith('_min') or key.endswith('_max'):
+                continue
+            if key == R1_name:
+                pm.add(key, value=R1_start, min=R1_min, max=R1_max)
+            else:
+                pmin = init_params.get(f'{key}_min', None)
+                pmax = init_params.get(f'{key}_max', None)
+                pmin, pmax = _compute_adaptive_bounds(
+                    value, method, user_min=pmin, user_max=pmax
+                )
+                pm.add(key, value=value, min=pmin, max=pmax)
+
+        try:
+            minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                               max_nfev=int(1e4))
+            r = minner.minimize(method=method)
+            chisqr = getattr(r, 'chisqr', float('inf'))
+            if np.isfinite(chisqr) and chisqr < best_chisqr:
+                best_chisqr = chisqr
+                best_result = r
+        except Exception as e:
+            # 单个起点失败不影响整体
+            print(f"    [start {i+1}/{n_starts}] 失败: {type(e).__name__}: {str(e)[:50]}")
+            continue
+
+    if best_result is not None:
+        print(f"  [多起点模式] 完成: best χ²={best_chisqr:.4e}")
+    else:
+        print(f"  [多起点模式] 全部起点失败")
+
+    return best_result
+
+
 def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_squares', **fit_kwargs):
     """
     智能调度拟合核心函数：根据条件自动选择标准拟合或极端条件拟合
@@ -537,13 +750,23 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
         pm = Parameters()
 
         # 提取所有参数（排除 min/max 后缀）
+        # P0-①: 使用 _compute_adaptive_bounds 根据 method 自动收紧全局方法边界
         for key, value in init_params.items():
             if key.endswith('_min') or key.endswith('_max'):
                 continue
 
-            # 获取对应的 min/max 值
-            min_val = init_params.get(f'{key}_min', 1e-15)
-            max_val = init_params.get(f'{key}_max', 1e15)
+            # 获取用户显式 min/max（如果存在）
+            user_min = init_params.get(f'{key}_min', None)
+            user_max = init_params.get(f'{key}_max', None)
+
+            # P0-①: 调用自适应边界计算
+            #   - 局部方法 (LS/LBFGSB/Powell/CG/BFGS/Nelder) 保持 1e-15~1e15
+            #   - 全局方法 (DE/DA/BH/AMPGO) 自动收紧到 init/1000~init*1000
+            min_val, max_val = _compute_adaptive_bounds(
+                value, method,
+                user_min=user_min, user_max=user_max,
+                tighten_factor=1000.0
+            )
 
             pm.add(key, value=value, min=min_val, max=max_val)
 
@@ -573,6 +796,21 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             result = minner.minimize(method='least_squares')
         elif method in ('differential_evolution', 'dual_annealing',
                         'basinhopping', 'ampgo'):
+            # P1: 多解性/极值量级场景下,自动使用多起点 + R1 物理约束
+            if _should_use_multi_start(init_params, method, freq):
+                multi_result = _multi_start_with_R1_constraint(
+                    freq, prodata, circuit, init_params, method,
+                    n_starts=10, r1_tighten=10.0, rng_seed=42
+                )
+                if multi_result is not None:
+                    return {
+                        'result': multi_result,
+                        'method': 'multi_start',
+                        'ident_info': None
+                    }
+                # 多起点全部失败时,回退到单点 DE/DA/BH/AMPGO
+                print(f"  [回退] 多起点失败,使用单点 {method}")
+
             # 进化/全局方法：参数直传给 scipy 对应函数（不接受 options=）
             # max_nfev 必须是 int（scipy 用作 maxiter）
             direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
