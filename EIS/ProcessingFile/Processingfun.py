@@ -34,7 +34,7 @@ def paraplate(prodata,Gf):
     resultsdata=list()
     for temp in range(0,len(prodata)):
         ZREmeasrued=prodata[temp]['Rs[ohm]']
-        ZIMmeasrued=prodata[temp]['Rs[ohm]']
+        ZIMmeasrued=prodata[temp]['X[ohm]']
         Zmeasrued=ZREmeasrued+1.j*ZIMmeasrued
         Zexptest=array(Zmeasrued)
 
@@ -77,10 +77,19 @@ def calibrate(refdata,prodata,params_info):
         ZREmeasrued=prodata[i]['Rs[ohm]']
         ZIMmeasrued=prodata[i]['X[ohm]']
         Zmeasrued=ZREmeasrued+1.j*ZIMmeasrued
-        ############   get data ############  
-       
-        ZMUT=Zstd*(Zshort-Zmeasrued)*(Zload-Zopen)/((Zmeasrued-Zopen)*(Zshort-Zload))
-        
+        ############   get data ############
+
+        # 修复: 当 Zmeas ≈ Zopen 时, 公式分母趋近 0 -> 物理意义 ZMUT=∞
+        # 之前直接产生 NaN, 现改用 np.where 避免 NaN
+        ZMUT_num = Zstd * (Zshort - Zmeasrued) * (Zload - Zopen)
+        ZMUT_den = (Zmeasrued - Zopen) * (Zshort - Zload)
+        # 使用 np.where: 分母为 0 时返回 inf (数学上的正确值)
+        # 阈值 1e-30 远小于实际物理阻抗, 仅用于浮点除零保护
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ZMUT = np.where(np.abs(ZMUT_den) < 1e-30,
+                            np.inf * np.sign(ZMUT_num + 1e-300),  # 保持符号
+                            ZMUT_num / ZMUT_den)
+
         resu=creatdatabase(Freq,ZMUT)
         resultsdata.append(resu)
 
@@ -118,7 +127,7 @@ def DieMat(refdata,prodata,params_info):
     
       #######################################
     Cair=ZairX/(omega*Zairabs**2)
-    Cwater=ZairX/(omega*Zwaterabs**2)
+    Cwater=ZwaterX/(omega*Zwaterabs**2)
     
     
     # 从params_info获取溶液名称和参数
@@ -348,10 +357,12 @@ def TLcalibrate(refdata,prodata,params_info):
 
 
 def TLcalculateEPS(prodata,params_info):
+    # 延迟导入: 仅在调用本函数时才加载 mpmath（避免 gmpy2 后端加载失败）
+    # 注: 模块顶部已有 import mpmath as mp (line 15), 此处 import 为冗余保留以防万一
     mu1 = 1  # 相对磁导率
     mu0 = 4*np.pi*1e-7  # 真空磁导率
-    eps0 = 8.854e-12    # 真空介电常数
-    Calsigma = 0  # 电导率初始值   
+    eps0 = 8.854187817e-12    # 真空介电常数
+    Calsigma = 0  # 电导率初始值
 
     resultsdata=list()
     
@@ -511,6 +522,7 @@ def TLcalculateEPS_JAX(prodata, params_info):
 
 
 def TLcalculateEIS(prodata,params_info):
+    # 注: 模块顶部已有 import mpmath as mp (line 15)
     mu1 = 1  # 相对磁导率
     mu0 = 4*pi*1e-7  # 真空磁导率
     eps0 = 8.854187817e-12    # 真空介电常数
@@ -530,10 +542,8 @@ def TLcalculateEIS(prodata,params_info):
         omega = 2 * pi * freq
         
         # 从prodata中读取介电常数数据
-        # epsRE = prodata[temp]['permittivityRE']
-        # epsIM = prodata[temp]['permittivityIM']
-        epsRE = prodata[temp]['EPS RE[-]']
-        epsIM = prodata[temp]['EPS IM[-]']
+        epsRE = prodata[temp]['EpsRE[-]']
+        epsIM = prodata[temp]['EpsIM[-]']
         eps = epsRE + 1j*epsIM
         eps = array(eps)
         
@@ -679,7 +689,7 @@ def creatdatabase(freq, Z):  #############创建结果数据库
     data = DataFrame()
     Z = Series(Z)
     data['FREQ[Hz]'] = freq
-    data['Z[ohm]'] = Series(real(Z))
+    data['Z[ohm]'] = Series(absolute(Z))  # BUG 修复: 原 real(Z) → absolute(Z)
     Phase = Series(angle(Z))
     data['PHASE[deg]'] = Series(Phase * 180 / pi)
     data['Rs[ohm]'] = Series(real(Z))

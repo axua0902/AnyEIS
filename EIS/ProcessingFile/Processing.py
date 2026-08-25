@@ -11,6 +11,11 @@ from EIS.InputFile.Inputfun import readfile
 from EIS.ProcessingFile.Processingfun import calibrate,paraplate,threesolutions,TLcalibrate,DieMat,TLcalculateEPS,TLcalculateEIS
 from EIS.Other.Datacheck import check1,check2,check3,check4,check5
 
+# 项目根目录（本文件位于 EIS/ProcessingFile/，向上 3 层即为项目根）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 参考文件对话框默认打开：TestData/Processing/DataProcess
+_DEFAULT_REF_DIR = os.path.join(_PROJECT_ROOT, 'TestData', 'Processing', 'DataProcess')
+
 """
 数据流动过程说明 (Data Flow Process):
 
@@ -434,7 +439,7 @@ class Dataprocess(QWidget, DataprocessUI):
 
     def GetrefFiles(self, ComboBoxNum):  ##inputdataButton输入新数据
         """获取参考文件"""
-        reffilename, _ = QFileDialog.getOpenFileName(self, 'Open File', 'C:\\',
+        reffilename, _ = QFileDialog.getOpenFileName(self, 'Open File', _DEFAULT_REF_DIR,
                                                      "Data Files (*.xlsx *.xls *.csv);;Text Files (*.txt);;All Files (*)")
         print(f'Selected reference file: {reffilename}')
         

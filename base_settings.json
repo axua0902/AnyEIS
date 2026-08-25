@@ -31,7 +31,7 @@
     "top_settings": {
         "paths": {
             "pending_data": "E:/Research/AnyEIS/AnyEIS4_test/Results",
-            "reference_data": "E:/Research/AnyEIS/AnyEIS4_test/reference_data",
+            "reference_data": "C:/Users/zhang an/Desktop/Research/paper/6.AnyEIS Software/AnyEIS/TestData/Processing/DataProcess",
             "results_data": "E:/Research/AnyEIS/AnyEIS4_test/results_data"
         },
         "export_image": {

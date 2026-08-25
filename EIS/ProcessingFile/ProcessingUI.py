@@ -147,8 +147,7 @@ class DataprocessUI(object):
         )
         self.processmethodComboBox.addItems([
             'Select Method','Dielectric Material Method','Parallel Plate Capacitor','Three-Solution Method',
-            'RF Impedance Calibration', 'RF Dielectric Calculation', 'RF Impedance Calculation','System Calibration',
-            'K-K for DS', 'K-K for EIS', 'Other'
+            'RF Impedance Calibration', 'RF Dielectric Calculation','System Calibration', 'Other'
         ])
         self.processmethodComboBox.setFixedWidth(230)
 
