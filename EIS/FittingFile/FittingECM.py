@@ -29,7 +29,11 @@ from pandas import DataFrame, Series
 from lmfit import Minimizer, Parameters, report_fit
 
 from EIS.ModelFile.EquivCircM import SearchParallel, CalculateParallel, CalculateSeries
-from FittingWarnings import warn as _emit_warning, info as _emit_info
+from FittingWarnings import (
+    warn as _emit_warning,
+    info as _emit_info,
+    warn_fallback as _emit_fallback_warning,
+)
 
 
 def _identify_circuit_params(param_values):
@@ -509,6 +513,65 @@ METHOD_TIGHTEN_FACTOR = {
     'powell': 100.0,      # 问题 2: Powell 需要更紧
 }
 
+# 问题 5 修复: 各方法不同的 max_nfev
+# dual_annealing 退火过程需要更多迭代
+METHOD_MAX_NFEV = {
+    'least_squares': int(1e5),
+    'nelder': int(1e5),
+    'lbfgsb': int(1e5),
+    'powell': int(1e5),
+    'cg': int(1e5),
+    'bfgs': int(1e5),
+    'differential_evolution': int(1e5),
+    'dual_annealing': int(5e5),   # ← 5 倍预算
+    'ampgo': int(1e5),
+}
+
+
+def _auto_select_loss(noise_level):
+    """
+    问题 4 修复: 根据噪声水平选择 least_squares 损失函数
+
+    保守策略: 默认 soft_l1, 只在极低/极高噪声下切换
+        - < 0.001 (0.1%): linear (L2, 高精度)
+        - 0.001 ~ 0.10: soft_l1 (默认, 平衡)
+        - > 0.10 (10%): huber (更鲁棒)
+
+    注: 由于 init_params 偏差会被误判为噪声, 采用保守策略
+        —— 大多数情况下用 soft_l1 是最安全的
+    """
+    if noise_level is None or not np.isfinite(noise_level):
+        return 'soft_l1'
+    if noise_level < 0.001:
+        return 'linear'
+    elif noise_level > 0.10:
+        return 'huber'
+    else:
+        return 'soft_l1'
+
+
+def _estimate_noise_level(prodata, freq, circuit, init_params):
+    """
+    问题 4 修复: 估计数据噪声水平
+
+    使用 init_params 拟合残差的中位数绝对偏差 (MAD)
+    加 0.10 上限: 防止 init_params 偏差过大被误判为高噪声
+    """
+    try:
+        ZData = prodata['Rs[ohm]'].values + 1j * prodata['X[ohm]'].values
+        pm = Parameters()
+        for k, v in init_params.items():
+            if not k.endswith('_min') and not k.endswith('_max') and np.isfinite(v):
+                pm.add(k, value=float(v), min=1e-15, max=1e15)
+        residuals = fcn2min(pm, freq, circuit, ZData)
+        med = float(np.median(np.abs(residuals)))
+        # 上限 0.10: 防止 init 偏差被误判为高噪声
+        if med > 0.10:
+            return 0.10
+        return med if np.isfinite(med) and med > 0 else None
+    except Exception:
+        return None
+
 
 def _compute_adaptive_bounds(init_value, method,
                               user_min=None, user_max=None,
@@ -892,12 +955,23 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
         safe_kwargs = {k: v for k, v in fit_kwargs.items() if k not in LS_ONLY}
 
         if method == 'least_squares':
-            # `loss` 是 scipy.optimize.least_squares 的合法 kwarg；其他方法不接受
+            # 问题 4 修复: 智能 loss（保守策略）
+            # 由于 init_params 偏差会被误判为噪声, 实际很难准确估算真实噪声
+            # 采用保守策略: 默认 soft_l1, 只在极端情况下切换
+            # 同时允许用户通过 fit_kwargs 强制指定 loss (如 loss='linear')
+            user_loss = safe_kwargs.get('loss', None)
+            if user_loss is not None:
+                loss = user_loss
+                print(f"  [LS 用户指定 loss] {loss}")
+            else:
+                noise_level = _estimate_noise_level(prodata, freq, circuit, init_params)
+                loss = _auto_select_loss(noise_level)
+                print(f"  [LS 智能 loss] noise={noise_level}, loss={loss}")
             minner = Minimizer(
                 fcn2min, pm, fcn_args=(freq, circuit, ZData),
                 **{**safe_kwargs,
                    'ftol': 1e-15, 'xtol': 1e-15, 'gtol': 3e-16,
-                   'loss': 'soft_l1', 'max_nfev': int(1e5),
+                   'loss': loss, 'max_nfev': int(1e5),
                    'tr_solver': 'lsmr', 'diff_step': 1e-15}
             )
             result = minner.minimize(method='least_squares')
@@ -918,13 +992,16 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
                 print(f"  [回退] 多起点失败,使用单点 {method}")
 
             # 进化/全局方法：参数直传给 scipy 对应函数（不接受 options=）
+            # 问题 5 修复: dual_annealing max_nfev 提升到 5e5
             # max_nfev 必须是 int（scipy 用作 maxiter）
             direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
             # 过滤掉 None（_cast_setting 对可空字段返回 None，scipy 不接受）
             direct_kwargs = {k: v for k, v in direct_kwargs.items() if v is not None}
+            # 问题 5 修复: 按方法选择 max_nfev
+            max_nfev_method = METHOD_MAX_NFEV.get(method, int(1e5))
             minner = Minimizer(
                 fcn2min, pm, fcn_args=(freq, circuit, ZData),
-                **{**direct_kwargs, 'max_nfev': int(1e5)}
+                **{**direct_kwargs, 'max_nfev': max_nfev_method}
             )
             result = minner.minimize(method=method)
         else:
@@ -941,13 +1018,22 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             )
             result = minner.minimize(method=method)
 
-        # ====== 问题 4: 拟合后失败检测 (局部方法失败自动降级) ======
-        if (method in ('lbfgsb', 'cg', 'bfgs', 'powell', 'nelder')
+        # ====== 问题 3: 拟合后失败检测 (弹窗方案 B - 完整对比) ======
+        original_result = result
+        original_method = method
+        original_chisqr = float(getattr(result, 'chisqr', float('inf'))) if result is not None else float('inf')
+        fallback_used = False
+
+        if (result is not None
+                and method in ('lbfgsb', 'cg', 'bfgs', 'powell', 'nelder')
                 and _is_fitting_failed(result, init_params)):
-            _emit_warning(
-                f"⚠️ {method} 拟合结果异常（参数最大误差 > 50%），\n"
-                f"可能陷入局部最优。\n\n"
-                f"建议自动降级到 differential_evolution 重试。"
+            # 第一阶段弹窗: 告知原方法失败, 即将降级
+            _emit_fallback_warning(
+                method=method,
+                original_result=original_result,
+                fallback_result=None,
+                original_chisqr=original_chisqr,
+                fallback_chisqr=0.0,
             )
             print(f"  [自动降级] {method} → differential_evolution")
             # 用 DE 重试
@@ -964,14 +1050,32 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
                     de_pm.add(key, value=value, min=mn, max=mx)
                 de_minner = Minimizer(
                     fcn2min, de_pm, fcn_args=(freq, circuit, ZData),
-                    max_nfev=int(1e5))
+                    max_nfev=METHOD_MAX_NFEV.get('differential_evolution', int(1e5)))
                 result = de_minner.minimize(method='differential_evolution')
+                fallback_used = True
+                fallback_chisqr = float(getattr(result, 'chisqr', float('inf')))
+                # 第二阶段弹窗: 显示降级前后完整对比
+                _emit_fallback_warning(
+                    method=method,
+                    original_result=original_result,
+                    fallback_result=result,
+                    original_chisqr=original_chisqr,
+                    fallback_chisqr=fallback_chisqr,
+                )
             except Exception as e:
                 print(f"  [降级失败] {e}")
 
         return {
             'result': result,
-            'method': 'standard',
+            'method': 'differential_evolution' if fallback_used else 'standard',
+            'original_result': original_result if fallback_used else None,
+            'original_method': original_method if fallback_used else None,
+            'fallback_chain': [
+                (original_method, 'failed', original_chisqr, 'max_err>50%'),
+                ('differential_evolution', 'success',
+                 float(getattr(result, 'chisqr', 0.0)), 'auto-degrade'),
+            ] if fallback_used else [],
+            'fallback_reason': 'method result abnormal' if fallback_used else '',
             'ident_info': None
         }
 

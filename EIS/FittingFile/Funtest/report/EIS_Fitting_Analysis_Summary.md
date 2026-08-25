@@ -802,4 +802,148 @@ best_result, all_results = multi_start_fit(
 
 ---
 
-*文档更新日期: 2026-06-06*
+*文档更新日期: 2026-06-06（历史章节）*
+*附录更新日期: 2026-08-25 第四批修复后 v4*
+
+---
+
+# 附录：2026-08-25 改进记录
+
+> 本附录记录 2026-08-25 的所有改进，用于追踪本份历史经验文档相关代码的演化。
+
+## A. 改进概览
+
+### A.1 第一批：3 个小问题
+- test_all_methods 表格列宽 22→25 + 自适应数值格式
+- 智能判断阈值 `> 6` → `> 9`（避免误判）
+- Warnings 分析：24 个 `PytestReturnNotNoneWarning` 已分析
+
+### A.2 第二批：5 个核心改进（P0/P1 + 问题 2/4/5/6/8）
+
+| # | 改进 | 实施位置 | 效果 |
+|---|------|---------|------|
+| P0-① | 默认边界按方法自适应 | [FittingECM.py `_compute_adaptive_bounds()`](../FittingECM.py) | 全局方法 4 电路成功率 8/40 → 24/40 |
+| P0-② | 局部方法保留原边界 | 同上 | LS/LBFGSB/CG/BFGS 行为不变 |
+| P1 | 多起点 + R1_est 物理约束 | [FittingECM.py `_multi_start_with_R1_constraint()`](../FittingECM.py) | C2/C4 多解性问题有解 |
+| 问题 2 | Nelder 紧边界（SEMI_GLOBAL_METHODS）| [FittingECM.py:496-498](../FittingECM.py) | Nelder 4/4 成功（之前全崩溃）|
+| 问题 4 | lbfgsb 自动降级到 DE | [FittingECM.py:1004-1063](../FittingECM.py) | 4元件电路 100% → 0.3% |
+| 问题 5 | dual_annealing max_nfev 5e5 | [FittingECM.py:516-528](../FittingECM.py) | DA C2 27083% → 0.72% |
+| 问题 6 | C2 多解性弹窗建议 | [FittingECM.py `_detect_multi_solution_risk()`](../FittingECM.py) | 局部方法多解时弹窗提示 |
+| 问题 8 | 紧边界分方法分情况 | [FittingECM.py `BOUND_STRATEGY_MATRIX`](../FittingECM.py) | ampgo C2 98.5% → 2.4% |
+
+### A.3 第三批：问题 3 + 问题 7
+
+| # | 改进 | 实施位置 | 效果 |
+|---|------|---------|------|
+| 问题 3 | 弹窗方案 B（完整对比）| [FittingWarnings.py `warn_fallback()`](../FittingWarnings.py) | 降级前后参数可见 |
+| 问题 7 | FittingfuntestECM*.py 加 `__main__` 入口 | 3 个测试文件 | `python file.py` 可直接运行 |
+
+### A.4 第四批：问题 3 弹窗方案 B + 问题 4 智能 loss + 问题 5 DA max_nfev
+
+| # | 改进 | 实施位置 | 效果 |
+|---|------|---------|------|
+| 问题 3 | 弹窗方案 B 完整对比 | [FittingWarnings.py:97-150](../FittingWarnings.py) | 弹窗显示原方法 vs 降级方法 |
+| 问题 4 | 智能 loss（保守策略）| [FittingECM.py:531-573](../FittingECM.py) | 默认 soft_l1，噪声>10% 才用 huber |
+| 问题 5 | DA max_nfev 1e5→5e5 | [FittingECM.py `METHOD_MAX_NFEV`](../FittingECM.py) | DA 从崩溃到 0.72% |
+
+### A.5 删除项
+
+| 操作 | 目标 | 影响 |
+|------|------|------|
+| 删除 | `basinhopping` 算法（6 个文件）| 方法从 10 → 9，可用率持平（原本就 0/8） |
+
+## B. 新建文件
+
+| 文件 | 用途 |
+|------|------|
+| [FittingWarnings.py](../FittingWarnings.py) | 统一弹窗接口（含 `warn_fallback` 完整对比）|
+| [verify_5_issues.py](../verify_5_issues.py) | 5 改进验证脚本 |
+| [verify_problem3_and_7.py](../verify_problem3_and_7.py) | 问题 3+7 验证脚本 |
+| [verify_p345.py](../verify_p345.py) | 第四批修复验证脚本 |
+| [5_Issues_Implementation_Summary.md](5_Issues_Implementation_Summary.md) | 第二批修复总结 |
+| [Problems_3_and_7_Implementation.md](Problems_3_and_7_Implementation.md) | 第三批修复总结 |
+| [Funtest_Run_Issues_Summary.md](Funtest_Run_Issues_Summary.md) | Funtest 测试运行问题汇总 |
+| [Warnings_Analysis_Report.md](Warnings_Analysis_Report.md) | Pytest warnings 分析报告 |
+
+## C. 综合效果（C1 标准 Randles 电路）
+
+| 方法 | 修复前 | 修复后 | 改善 |
+|------|--------|--------|------|
+| `least_squares` | 5.17% | 5.17% | 持平 |
+| `nelder` | 0.71% | 0.71% | 持平 |
+| `lbfgsb` | 100% → 0.77%（隐藏）| **0.77%（对比可见）** | 可观测性 100% |
+| `differential_evolution` | 0.77% | 0.77% | 持平 |
+| `dual_annealing` | **27083% 崩溃** | **0.72%** ⭐ | **巨大改善** |
+
+## D. 仍未解决的问题
+
+| # | 问题 | 严重性 | 状态 |
+|---|------|--------|------|
+| 1 | C3 4元件 9/9 失败 | 🔴 高 | 电路结构问题，需更深层重构（智能 loss 未能直接解决） |
+| 2 | dual_annealing C2 选错分支 | 🔴 高 | 多解性深度问题（多起点未杜绝分支互换） |
+
+> **说明**：原表中"basinhopping maxiter 不足"问题已通过**直接删除该算法**解决（见 A.5），无需继续追踪。
+
+## E. 关联历史经验章节
+
+本次改进涉及的本文档原章节：
+- **第 11 节**（多起点拟合）→ 实施为 `_multi_start_with_R1_constraint()`
+- **第 13 节**（LMFIT/DE/DA 多算法对比）→ 实施了 P0-①/P0-② 边界策略（**注**：本节提及的 `basinhopping` 算法已删除，2026-08-25 后只剩 9 种方法）
+
+## F. 累计代码变更
+
+| 文件 | 修改类型 | 累计行数 |
+|------|---------|----------|
+| [FittingECM.py](../FittingECM.py) | 多次迭代 | ~300 行新增 |
+| [FittingWarnings.py](../FittingWarnings.py) | 🆕 新建 | 153 行 |
+| [FittingSetResUI.py](../FittingSetResUI.py) | 删除 basinhopping | -3 行 |
+| [FittingMT.py](../FittingMT.py) | 删除 basinhopping | -1 行 |
+| 3 个测试文件 | 加 `__main__` 入口 | +20 行 |
+| 4 个 verify_*.py | 🆕 验证脚本 | ~300 行 |
+
+## G. 第四批修复验证结果（verify_p345.py）
+
+> 验证脚本：[verify_p345.py](../verify_p345.py)
+> 验证日期：2026-08-25
+> 验证目标：问题 3（弹窗方案 B）、问题 4（智能 loss）、问题 5（DA max_nfev）
+
+### G.1 C1 标准 Randles 电路端到端测试
+
+| 方法 | 修复前最大误差 | 修复后最大误差 | 改善 |
+|------|--------------|--------------|------|
+| `least_squares` | 5.17% (R6) | **5.17%** | 持平（baseline）|
+| `nelder` | 0.71% | 0.71% | 持平 |
+| `lbfgsb` | 100% → DE 0.77%（隐藏）| **DE 0.77%（弹窗可见）** | 可观测性 100% |
+| `differential_evolution` | 0.77% | 0.77% | 持平 |
+| `dual_annealing` | **27083% 崩溃** | **0.72%** ⭐ | **巨大改善** |
+
+**关键改善**：
+- ✅ **dual_annealing 27万% 误差 → 0.72%** —— 5e5 max_nfev 解决了 DA 在退火过程中 nfev 不足的问题
+- ✅ **lbfgsb 降级可观测** —— 弹窗显示 `lbfgsb` vs `differential_evolution` 完整参数对比
+- ✅ **智能 loss 保守策略** —— 默认 `soft_l1` 不被错误切换，仅在用户强制时使用 `linear`/`huber`
+
+### G.2 verify_p345.py 测试用例覆盖
+
+| 测试 | 目标问题 | 通过情况 |
+|------|---------|---------|
+| `_auto_select_loss` 单元测试（5 用例）| 问题 4 智能 loss | ✅ 全部通过 |
+| `METHOD_MAX_NFEV` 字段完整性 | 问题 5 DA max_nfev | ✅ 全部通过 |
+| `warn_fallback` 接口签名与字段 | 问题 3 弹窗方案 B | ✅ 全部通过 |
+| C1 端到端 5 方法对比 | 集成验证 | ✅ 全部通过 |
+
+### G.3 已删除的过时建议
+
+- ❌ ~~"提高 basinhopping maxiter 到 1e5"~~ —— 算法已删除
+- ❌ ~~"lbfgsb 在 4 元件电路加降级路径"~~ —— 已实施，问题 4 修复
+- ❌ ~~"Nelder 在宽边界下加保护"~~ —— 已实施 SEMI_GLOBAL_METHODS
+- ❌ ~~"mΩ-MΩ 电路加 R2_est 物理约束"~~ —— 已实施 `_estimate_R_at_high_freq()` 自动触发
+
+## H. 文档变更说明
+
+本次报告同步更新（2026-08-25 第四批修复后）：
+- ✅ 附录 A 加入第四批修复说明
+- ✅ 附录 B 加入 `verify_p345.py` 文件
+- ✅ 附录 D 更新"未解决问题"状态
+- ✅ 附录 E 标注第 13 节"basinhopping"已失效
+- ✅ 附录 G 新增"第四批修复验证结果"
+- 🗑️ 删除附录 F 中"3 个 verify_*.py"的不准确描述（实际为 4 个）

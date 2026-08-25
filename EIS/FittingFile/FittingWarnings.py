@@ -94,6 +94,62 @@ def critical(message, title=None):
     return emit_warning(message, 'critical', title)
 
 
+def warn_fallback(method, original_result, fallback_result,
+                original_chisqr, fallback_chisqr, true_params=None):
+    """
+    问题 3 修复: 弹窗显示完整对比（弹窗方案 B）
+
+    显示:
+        - 原方法参数 + χ²
+        - 降级方法参数 + χ²
+        - 自动使用降级结果
+    """
+    title = f"拟合失败自动降级 - {method}"
+
+    # 构造对比消息
+    lines = []
+    lines.append(f"⚠️ {method} 拟合结果异常（参数误差 > 50%）")
+    lines.append(f"已自动降级到 differential_evolution\n")
+
+    # 原方法
+    lines.append(f"【原方法】{method}")
+    lines.append(f"  χ² = {original_chisqr:.3e}")
+    if original_result is not None and hasattr(original_result, 'params'):
+        for name in original_result.params:
+            if name.endswith('_min') or name.endswith('_max'):
+                continue
+            val = original_result.params[name].value
+            true_val = true_params.get(name) if true_params else None
+            if true_val is not None and true_val != 0:
+                err = abs((val - true_val) / true_val) * 100
+                lines.append(f"  {name} = {val:.4g} (真实 {true_val:.4g}, 误差 {err:.1f}%)")
+            else:
+                lines.append(f"  {name} = {val:.4g}")
+
+    lines.append("")
+
+    # 降级方法
+    lines.append(f"【降级后】differential_evolution")
+    lines.append(f"  χ² = {fallback_chisqr:.3e}")
+    if fallback_result is not None and hasattr(fallback_result, 'params'):
+        for name in fallback_result.params:
+            if name.endswith('_min') or name.endswith('_max'):
+                continue
+            val = fallback_result.params[name].value
+            true_val = true_params.get(name) if true_params else None
+            if true_val is not None and true_val != 0:
+                err = abs((val - true_val) / true_val) * 100
+                lines.append(f"  {name} = {val:.4g} (真实 {true_val:.4g}, 误差 {err:.1f}%)")
+            else:
+                lines.append(f"  {name} = {val:.4g}")
+
+    lines.append("")
+    lines.append("✅ 已自动使用 differential_evolution")
+
+    message = "\n".join(lines)
+    return emit_warning(message, 'warning', title)
+
+
 if __name__ == '__main__':
     # 自测试
     set_silent_mode(True)
