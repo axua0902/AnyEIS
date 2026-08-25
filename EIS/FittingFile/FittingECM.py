@@ -29,11 +29,30 @@ from pandas import DataFrame, Series
 from lmfit import Minimizer, Parameters, report_fit
 
 from EIS.ModelFile.EquivCircM import SearchParallel, CalculateParallel, CalculateSeries
-from FittingWarnings import (
-    warn as _emit_warning,
-    info as _emit_info,
-    warn_fallback as _emit_fallback_warning,
-)
+
+# FittingWarnings 兼容多种导入方式（绝对/相对/直接），保证不同运行环境都能加载
+try:
+    # 1) 绝对导入（与 Fitting.py 风格一致，从项目根目录运行时）
+    from EIS.FittingFile.FittingWarnings import (
+        warn as _emit_warning,
+        info as _emit_info,
+        warn_fallback as _emit_fallback_warning,
+    )
+except ImportError:
+    try:
+        # 2) 相对导入（作为包内模块加载时）
+        from .FittingWarnings import (
+            warn as _emit_warning,
+            info as _emit_info,
+            warn_fallback as _emit_fallback_warning,
+        )
+    except ImportError:
+        # 3) 直接导入（从 EIS/FittingFile/ 目录运行 Funtest 测试时）
+        from FittingWarnings import (
+            warn as _emit_warning,
+            info as _emit_info,
+            warn_fallback as _emit_fallback_warning,
+        )
 
 
 def _identify_circuit_params(param_values):

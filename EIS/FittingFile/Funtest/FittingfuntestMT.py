@@ -492,12 +492,103 @@ def test_visualization():
              verticalalignment='center')
     
     plt.tight_layout()
-    plt.savefig('FittingMT_test_results.png', dpi=150, bbox_inches='tight')
-    print("  ✓ 图片已保存: FittingMT_test_results.png")
-    
+
     plt.show()
-    
+
     print("\n[测试5] ✓ 可视化测试完成")
+
+
+# =============================================================================
+# 测试6: Fittingresultsprocess 后处理测试
+# =============================================================================
+
+def test_results_processing():
+    """测试 Fittingresultsprocess 后处理函数
+
+    验证:
+        1. 返回 DataFrame 类型
+        2. DataFrame 列名匹配 creatdatabase 规范
+        3. 行数等于频率数
+        4. 不含 NaN/Inf
+        5. 拟合参数已正确写入 pm
+    """
+    print("\n" + "="*70)
+    print("测试6: Fittingresultsprocess 后处理")
+    print("="*70)
+
+    # 独立做一次最小拟合（不依赖 test_standard_fitting 避免重复计算）
+    freq = np.logspace(3, 7, 50)
+    true_params = {
+        'epsh': 10.0,
+        'sigmaDC': 1e-4,
+        'Deps1': 50.0,
+        'Tao1': 1e-5,
+        'Deps2': 30.0,
+        'Tao2': 1e-7
+    }
+    modelterm = [
+        {'modeltype': 'Debye', 'name': '1'},
+        {'modeltype': 'Debye', 'name': '2'}
+    ]
+    option = {'EP': 0, 'DC Conductivity': 1}
+
+    prodata, _ = generate_synthetic_data(true_params, freq, modelterm, option)
+
+    # 初始参数（偏离真值 20%）
+    pm = Parameters()
+    for name, value in true_params.items():
+        pm.add(name, value=value * 1.2, min=0)
+
+    # 执行拟合
+    result = FittingMT(pm, freq, modelterm, prodata, option)
+    assert result.success, "拟合应成功"
+    print(f"  拟合成功: chi²={result.chisqr:.4e}")
+
+    # 构造一个新的 pm（空），用于验证 Fittingresultsprocess 写入参数
+    pm_target = Parameters()
+    for name in true_params:
+        pm_target.add(name, value=0.0)  # 初始为 0
+
+    # 调用后处理
+    result_df = Fittingresultsprocess(pm_target, freq, modelterm, result, option)
+
+    # ===== 验证 1: 返回类型 =====
+    assert isinstance(result_df, DataFrame), \
+        f"应返回 DataFrame，实际为 {type(result_df).__name__}"
+    print("  ✓ 返回 DataFrame 类型正确")
+
+    # ===== 验证 2: 列名匹配 =====
+    expected_cols = ['FREQ[Hz]', 'epsRE[-]', 'epsIM[-]', 'sigmaRE[S/m]', 'sigmaIM[S/m]']
+    assert list(result_df.columns) == expected_cols, \
+        f"列名不匹配，期望 {expected_cols}，实际 {list(result_df.columns)}"
+    print(f"  ✓ 列名匹配: {list(result_df.columns)}")
+
+    # ===== 验证 3: 行数 =====
+    assert len(result_df) == len(freq), \
+        f"行数应等于频率数，期望 {len(freq)}，实际 {len(result_df)}"
+    print(f"  ✓ 行数匹配: {len(result_df)} == len(freq)")
+
+    # ===== 验证 4: 无 NaN/Inf =====
+    assert not result_df.isna().any().any(), "DataFrame 不应包含 NaN"
+    assert np.isfinite(result_df.select_dtypes(include=[np.number]).values).all(), \
+        "DataFrame 不应包含 Inf"
+    print("  ✓ 无 NaN/Inf")
+
+    # ===== 验证 5: 参数已正确写入 pm_target =====
+    for name in result.var_names:
+        fit_val = result.params[name].value
+        pm_val = pm_target[name].value
+        assert abs(pm_val - fit_val) < 1e-10, \
+            f"参数 {name} 未正确写入 pm：期望 {fit_val}，实际 {pm_val}"
+    print(f"  ✓ 参数已正确写入 pm（{len(result.var_names)} 个）")
+
+    # ===== 验证 6: 拟合数据应与原始数据形状一致 =====
+    eps_calc = result_df['epsRE[-]'].values - 1j * result_df['epsIM[-]'].values
+    assert eps_calc.shape == (len(freq),), \
+        f"介电谱形状错误：期望 ({len(freq)},)，实际 {eps_calc.shape}"
+    print(f"  ✓ 介电谱形状正确: {eps_calc.shape}")
+
+    print("\n[测试6] ✓ Fittingresultsprocess 后处理测试通过")
 
 
 # =============================================================================
@@ -509,16 +600,17 @@ def run_all_tests():
     print("\n" + "="*70)
     print("FittingMT.py 综合测试套件")
     print("="*70)
-    
+
     passed = 0
     failed = 0
-    
+
     tests = [
         ("基础功能测试", test_basic_functions),
         ("标准拟合测试", lambda: test_standard_fitting()[0]),  # 仅返回result
         ("FittingMT_auto测试", test_auto_fitting),
         ("模型类型测试", test_model_types),
-        ("可视化测试", test_visualization)
+        ("可视化测试", test_visualization),
+        ("后处理测试", test_results_processing),  # 新增
     ]
     
     for test_name, test_func in tests:
