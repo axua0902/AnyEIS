@@ -3,7 +3,17 @@
 测试文件验证脚本
 用于快速验证 FittingMSfortest.py 和 FittingMStest.py 是否正确更新
 
+测试目标: FittingMSfortest.py + FittingMStest.py（项目早期版本遗留）
+测试类型: 导入验证
+
+注意: 此脚本验证的 FittingMSfortest.py / FittingMStest.py 文件
+      已不在当前仓库结构中，仅作历史保留。如已不需要可直接删除。
+
+运行方式:
+    python EIS/FittingFile/Funtest/verify_updates.py
+
 Created: 2026-04-29
+Updated on 2026-08-25: 规范化头注释
 """
 
 import sys

@@ -2,10 +2,8 @@
 """
 EIS 等效电路拟合测试套件 - 复杂电路与极限条件测试
 
-> **DEPRECATED**：
-> 推荐使用 [test_all_methods.py](test_all_methods.py) 作为统一测试入口。
-> 本文件保留为单独测试复杂电路和极限条件的旧版脚本，
-> 所有函数已添加 `method` 参数以支持 10 种优化方法。
+测试目标: [FittingECM.py](../FittingECM.py)
+测试类型: 单元测试（复杂混合串并联电路 + 极限条件）
 
 测试策略：
 1. 基础串联/并联电路已验证通过，本文件聚焦于复杂电路和已知失败场景
@@ -24,9 +22,15 @@ EIS 等效电路拟合测试套件 - 复杂电路与极限条件测试
 - 极端参数量级差异时某些参数不可辨识
 - 频率跨度过大时拟合收敛困难
 
+所有函数已添加 `method` 参数以支持 10 种优化方法。
+
+运行方式:
+    python EIS/FittingFile/Funtest/FittingfuntestECM.py
+
 Created on 2026-06-06
 @author: takeilab
-Updated on 2026-08-24: 添加 method 参数 + 与 test_all_methods 同步
+Updated on 2026-08-24: 添加 method 参数
+Updated on 2026-08-25: 规范化头注释，移除 DEPRECATED 标记
 """
 
 import sys

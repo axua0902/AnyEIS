@@ -2,6 +2,9 @@
 """
 FittingMT.py 综合测试套件
 
+测试目标: [FittingMT.py](../FittingMT.py)
+测试类型: 单元测试（介电 / 多弛豫模型）
+
 测试内容：
 1. 基础功能测试：fittingmodel, fcn2min, creatdatabase
 2. 标准拟合测试：FittingMT (双弛豫模型)
@@ -10,8 +13,12 @@ FittingMT.py 综合测试套件
 5. 多参数场景测试：单、双、三弛豫
 6. 结果可视化
 
+运行方式:
+    python EIS/FittingFile/Funtest/FittingfuntestMT.py
+
 Created on 2020-08-04, Updated on 2026-06-05
 @author: takeilab
+Updated on 2026-08-25: 规范化头注释
 """
 
 import sys

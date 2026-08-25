@@ -2,10 +2,8 @@
 """
 EIS 等效电路拟合测试套件 - 极端条件与策略验证
 
-> **DEPRECATED**：
-> 推荐使用 [test_all_methods.py](test_all_methods.py) 作为统一测试入口。
-> 本文件保留为单独测试策略选择和决策函数的旧版脚本，
-> `test_auto_fitting_edge_cases` 已添加 `methods` 参数。
+测试目标: [FittingECM.py](../FittingECM.py) + [FittingECM_extreme.py](../FittingECM_extreme.py)
+测试类型: 单元测试（策略选择和决策函数验证）
 
 本文件聚焦于：
 1. 决策函数验证（should_use_segmented, should_use_extreme）
@@ -19,9 +17,15 @@ EIS 等效电路拟合测试套件 - 极端条件与策略验证
 - 揭示极端条件下的问题，而非掩盖
 - 为用户提供明确的电路设计边界指导
 
+`test_auto_fitting_edge_cases` 已添加 `methods` 参数以支持多方法测试。
+
+运行方式:
+    python EIS/FittingFile/Funtest/FittingfuntestECM2.py
+
 Created on 2026-06-06
 @author: takeilab
-Updated on 2026-08-24: 添加 methods 参数 + 与 test_all_methods 同步
+Updated on 2026-08-24: 添加 methods 参数
+Updated on 2026-08-25: 规范化头注释，移除 DEPRECATED 标记
 """
 
 import sys

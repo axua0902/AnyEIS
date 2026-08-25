@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 # noqa: E501
 r"""
-测试 ECMcalculation 函数的测试文件
+ECMcalculation 函数 smoke test
 
-> **DEPRECATED**：
-> 推荐使用 [test_all_methods.py](test_all_methods.py) 作为统一测试入口。
-> 本文件保留为单次运行的旧版 smoke test，已修复 ampgo 兼容性。
+测试目标: [FittingECM.py](../FittingECM.py) 中的 ECMcalculation
+测试类型: 单次 smoke test（验证基础流程 + ampgo 兼容性）
+
+已修复 ampgo 兼容性（result.message 兜底）。
 
 运行方式:
     python EIS/FittingFile/Funtest/FittingTest.py
