@@ -107,7 +107,6 @@ class settingUI():
         self.methodComboBox.addItem('nelder')
         self.methodComboBox.addItem('lbfgsb')
         self.methodComboBox.addItem('differential_evolution')
-        self.methodComboBox.addItem('basinhopping')
         self.methodComboBox.addItem('powell')
         self.methodComboBox.addItem('cg')
         self.methodComboBox.addItem('dual_annealing')
@@ -130,7 +129,6 @@ class settingUI():
             'nelder': 3,
             'lbfgsb': 3,
             'differential_evolution': 6,
-            'basinhopping': 6,
             'powell': 3,
             'cg': 3,
             'dual_annealing': 3,
@@ -142,7 +140,6 @@ class settingUI():
             'nelder': ['xatol', 'fatol', 'maxiter'],
             'lbfgsb': ['ftol', 'gtol', 'maxls'],
             'differential_evolution': ['strategy', 'maxiter', 'popsize', 'tol', 'mutation', 'recombination'],
-            'basinhopping': ['niter', 'T', 'stepsize', 'interval', 'niter_success', 'seed'],
             'powell': ['xtol', 'ftol', 'maxiter'],
             'cg': ['gtol', 'norm', 'eps'],
             'dual_annealing': ['initial_temp', 'restart_temp_ratio', 'maxiter'],

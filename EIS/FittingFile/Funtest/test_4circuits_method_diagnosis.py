@@ -1,21 +1,38 @@
 # -*- coding: utf-8 -*-
 """
-4 电路 × 10 算法 多算法对比测试 (诊断版)
+4 电路 × 10 算法 × 2 边界策略 多算法对比诊断测试
 
-参考 [EIS_Fitting_Analysis_Summary.md](EIS_Fitting_Analysis_Summary.md) 的经验，
+测试目标: [FittingECM.py](../FittingECM.py) `auto_fitting`
+测试类型: 多算法 × 多电路 × 多边界策略 对比测试
+
+参考 [../report/EIS_Fitting_Analysis_Summary.md](../report/EIS_Fitting_Analysis_Summary.md) 的经验，
 设计 4 个有代表性的电路（覆盖：基准/多解性/边界/极限量级），
 对比 10 种优化方法在每个电路上的拟合效果与失败模式。
 
+4 个测试电路：
+1. Randles 基准：R1 + p(C3, R6)              - 已知稳定
+2. 双并联分支：R1 + p(C1, R2) + p(C3, R4)    - 多解性挑战
+3. 树状 4 元件：R1 + p(C1, R2) + R3         - 边界可靠性
+4. 极端量级差：R1 + p(C3, R6)，R1=1mΩ/R6=1MΩ - 极限挑战
+
+9 个方法（不含 basinhopping）：
+  least_squares / nelder / lbfgsb / differential_evolution /
+  powell / cg / dual_annealing / bfgs / ampgo
+
 本测试包含 2 个阶段：
-  阶段 A: 宽边界 [1e-15, 1e15]  - 模拟现有 FittingECM._auto_fitting_core 默认行为
-  阶段 B: 紧边界 [init/100, init*100] - 测试如果收紧边界会如何
+  阶段 A: 宽边界 [1e-15, 1e15]  - 模拟默认行为
+  阶段 B: 紧边界 [init/100, init*100] - 测试收紧效果
 
 输出：
   1. 控制台实时输出每个组合的结果
-  2. 保存 Markdown 报告到 test_4circuits_method_diagnosis_report.md
+  2. 保存 Markdown 报告到 [../report/test_4circuits_method_diagnosis_report.md](../report/test_4circuits_method_diagnosis_report.md)
 
 运行方式：
   python EIS/FittingFile/Funtest/test_4circuits_method_diagnosis.py
+
+Created on 2026-08-25
+@author: takeilab
+Updated on 2026-08-25: 规范化头注释（测试目标/测试类型/运行方式）
 """
 import sys
 import os
@@ -80,7 +97,7 @@ CIRCUITS = {
 
 METHODS = [
     'least_squares', 'nelder', 'lbfgsb', 'differential_evolution',
-    'basinhopping', 'powell', 'cg', 'dual_annealing', 'bfgs', 'ampgo',
+    'powell', 'cg', 'dual_annealing', 'bfgs', 'ampgo',
 ]
 
 # 两种边界策略
@@ -306,7 +323,6 @@ def generate_report(results, report_path):
     lines.append('| `bfgs` | 局部 | 拟牛顿 |')
     lines.append('| `differential_evolution` | 全局 | 遗传算法变体，DE |')
     lines.append('| `dual_annealing` | 全局 | 双模拟退火 |')
-    lines.append('| `basinhopping` | 全局 | 盆地跳跃 |')
     lines.append('| `ampgo` | 全局 | Accelerated Modified Powell Gradient（需 ampgo 包） |')
     lines.append('')
     lines.append('### 1.3 边界策略对比')
@@ -524,7 +540,7 @@ def generate_report(results, report_path):
     lines.append('')
     lines.append('在 `_auto_fitting_core` 中，所有方法都使用同一套边界 `min=1e-15, max=1e15`（30 个数量级！）。')
     lines.append('对 `least_squares`、`lbfgsb` 等局部算法影响小（因为它们在初值附近搜索），')
-    lines.append('但对 `differential_evolution`、`dual_annealing`、`basinhopping` 等全局算法而言：')
+    lines.append('但对 `differential_evolution`、`dual_annealing` 等全局算法而言：')
     lines.append('')
     lines.append('- 搜索空间太大，30 个数量级')
     lines.append('- 群体/退火随机生成的候选解可能偏离真值 1e10 以上')
@@ -589,8 +605,12 @@ def generate_report(results, report_path):
 if __name__ == '__main__':
     results = run_all()
     print_summary(results)
+    # 报告保存到 report/ 子目录
     report_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
+        'report',
         'test_4circuits_method_diagnosis_report.md'
     )
+    # 确保 report/ 目录存在
+    os.makedirs(os.path.dirname(report_path), exist_ok=True)
     generate_report(results, report_path)

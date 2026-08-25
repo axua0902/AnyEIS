@@ -1,18 +1,34 @@
 # -*- coding: utf-8 -*-
 """
-全方法 smoke test - 验证 _auto_fitting_core 修复
+全方法综合回归测试 - 验证 _auto_fitting_core 修复
+
+测试目标: [FittingECM.py](../FittingECM.py) `_auto_fitting_core`
+测试类型: 综合回归测试（7 测试组）
 
 集中入口：
 - 旧 FittingfuntestECM / FittingfuntestECM2 / FittingTest 的核心功能
-- 10 个优化方法全跑通
+- 9 个优化方法全跑通（不含 basinhopping）
 - UI 文本框字符串 -> 后端 kwargs 转换
 - 后处理（FittingresultsprocessECM / Fittingresultsprocess）兼容 ampgo
 - 策略选择函数 (should_use_segmented / should_use_extreme) 边界
+
+7 组测试内容：
+1. 参数类型转换（type casting）
+2. 方法 smoke test
+3. UI 流程（文本框 → kwargs）
+4. 决策函数（should_use_segmented / should_use_extreme）
+5. 极端条件测试
+6. MT 路径
+7. 噪声对比
 
 运行方式：
     python EIS/FittingFile/Funtest/test_all_methods.py
     python EIS/FittingFile/Funtest/test_all_methods.py --method lbfgsb   # 只跑一个方法
     python EIS/FittingFile/Funtest/test_all_methods.py --quick          # 只跑主流程
+
+Created on 2026-08-24
+@author: takeilab
+Updated on 2026-08-25: 规范化头注释（测试目标/测试类型/运行方式）
 """
 import sys
 import os
@@ -34,7 +50,7 @@ from EIS.FittingFile.FittingMT import FittingMT, Fittingresultsprocess
 
 ALL_METHODS = [
     'least_squares', 'nelder', 'lbfgsb', 'differential_evolution',
-    'basinhopping', 'powell', 'cg', 'dual_annealing', 'bfgs', 'ampgo',
+    'powell', 'cg', 'dual_annealing', 'bfgs', 'ampgo',
 ]
 QUICK_METHODS = ['least_squares', 'lbfgsb', 'differential_evolution', 'ampgo']
 
@@ -161,8 +177,6 @@ def test_full_ui_flow(methods=None):
         'differential_evolution': {'strategy': 'best1bin', 'maxiter': '200',
                                    'popsize': '15', 'tol': '0.01',
                                    'mutation': '0.5', 'recombination': '0.7'},
-        'basinhopping':           {'niter': '50', 'T': '1.0', 'stepsize': '0.5',
-                                   'interval': '10', 'niter_success': '5', 'seed': ''},
         'powell':                 {'xtol': '1e-8', 'ftol': '1e-8', 'maxiter': '1000'},
         'cg':                     {'gtol': '1e-5', 'norm': 'inf', 'eps': '1e-8'},
         'dual_annealing':         {'initial_temp': '5230', 'restart_temp_ratio': '2e-5',
@@ -400,8 +414,11 @@ def test_noise_levels(methods=None):
     Z_true, _ = simuECM(pm_true, circuit, freq)
 
     noise_levels = [0.01, 0.05, 0.10, 0.20]
-    print(f"\n{'noise':<8s}" + "".join(f"{m:>22s}" for m in methods))
-    print('-' * (8 + 22 * len(methods)))
+    # 列宽统一 25 字符，兼容 differential_evolution(23) 等长方法名；
+    # 数值 < 1e6 用 % 显示，否则用科学计数法，列对齐
+    COL_W = 25
+    print(f"\n{'noise':<8s}" + "".join(f"{m:>{COL_W}s}" for m in methods))
+    print('-' * (8 + COL_W * len(methods)))
     for noise in noise_levels:
         np.random.seed(42)
         n = noise * (np.random.randn(len(freq)) + 1j * np.random.randn(len(freq)))
@@ -419,9 +436,13 @@ def test_noise_levels(methods=None):
                     abs((r.params[n].value - true[n]) / true[n]) * 100
                     for n in true
                 )
-                row += f"  {max_err:>6.2f}%         "
+                if abs(max_err) < 1e6:
+                    val_str = f"{max_err:>12.4f}%"
+                else:
+                    val_str = f"{max_err:>12.2e}%"
+                row += val_str.ljust(COL_W)
             except Exception:
-                row += f"  {'ERR':>9s}     "
+                row += f"{'ERR':>{COL_W}s}"
         print(row)
     return True
 

@@ -29,6 +29,7 @@ from pandas import DataFrame, Series
 from lmfit import Minimizer, Parameters, report_fit
 
 from EIS.ModelFile.EquivCircM import SearchParallel, CalculateParallel, CalculateSeries
+from FittingWarnings import warn as _emit_warning, info as _emit_info
 
 
 def _identify_circuit_params(param_values):
@@ -478,7 +479,7 @@ def should_use_extreme(freq, init_params):
     # 判断：频率跨度大且参数量级差异大
     if freq_span > 7 and magnitude_range > 5:
         return True, f"频率跨度{freq_span:.1f}数量级 + 参数量级差异{magnitude_range:.1f}"
-    elif magnitude_range > 6:
+    elif magnitude_range > 9:
         return True, f"参数量级差异{magnitude_range:.1f}太大"
     else:
         return False, f"参数可辨识，无极端条件"
@@ -490,61 +491,61 @@ def should_use_extreme(freq, init_params):
 # =============================================================================
 
 # 全局优化方法集合（与 _auto_fitting_core 中的判断保持一致）
-GLOBAL_METHODS = {'differential_evolution', 'dual_annealing',
-                  'basinhopping', 'ampgo'}
+GLOBAL_METHODS = {'differential_evolution', 'dual_annealing', 'ampgo'}
+
+# 问题 2 修复: 无梯度局部方法(Nelder/Powell)也需要紧边界
+SEMI_GLOBAL_METHODS = {'nelder', 'powell'}
+
+# 所有需要自适应边界的方法
+ALL_BOUND_SENSITIVE = GLOBAL_METHODS | SEMI_GLOBAL_METHODS
+
+# 问题 8 修复: 不同方法使用不同的默认 tighten_factor
+# Nelder/Powell 需要更紧的边界（100x），全局方法 1000x
+METHOD_TIGHTEN_FACTOR = {
+    'differential_evolution': 1000.0,
+    'dual_annealing': 1000.0,
+    'ampgo': 1000.0,
+    'nelder': 100.0,      # 问题 2: Nelder 需要更紧
+    'powell': 100.0,      # 问题 2: Powell 需要更紧
+}
 
 
 def _compute_adaptive_bounds(init_value, method,
                               user_min=None, user_max=None,
-                              tighten_factor=1000.0):
+                              tighten_factor=None,
+                              circuit_type='simple_randles'):
     """
     为不同方法计算合适的参数边界
 
     规则:
-        1. 局部方法 (least_squares/nelder/lbfgsb/powell/cg/bfgs):
-           完全保留原行为 —— 1e-15 ~ 1e15 或用户显式设置
-        2. 全局方法 (DE/DA/BH/AMPGO):
-           - 如果用户显式设置了更紧的边界，沿用用户设置
-           - 否则自动收紧到 [init/tighten, init*tighten]
-             默认 tighten=1000, 即 ±3 个数量级
-        3. init 必须为正；非正时回退到 1e-6
-
-    参数:
-        init_value: 参数初值
-        method: 优化方法名
-        user_min: 用户显式下界（None 表示未设置）
-        user_max: 用户显式上界（None 表示未设置）
-        tighten_factor: 全局方法的收紧系数（默认 1000）
-
-    返回:
-        (min_val, max_val)
+        1. 局部方法 (LS/cg/bfgs/lbfgsb) 保留 1e-15~1e15
+        2. 半全局方法 (Nelder/Powell) 收紧到 init/100~init*100
+        3. 全局方法 (DE/DA/AMPGO) 收紧到 init/1000~init*1000
+        4. 问题 8 修复: 根据电路类型选择不同 factor
     """
-    # 局部方法：完全保留原行为
-    if method not in GLOBAL_METHODS:
+    if method not in ALL_BOUND_SENSITIVE:
+        # 局部方法：完全保留原行为
         return (1e-15 if user_min is None else user_min,
                 1e15  if user_max is None else user_max)
 
-    # 全局方法：init 必须为正
-    if init_value <= 0 or not np.isfinite(init_value):
+    if init_value <= 0:
         init_value = 1e-6
 
-    # 自适应边界
+    # 问题 8 修复: 根据方法+电路类型选择 factor
+    if tighten_factor is None:
+        tighten_factor = METHOD_TIGHTEN_FACTOR.get(method, 1000.0)
+
     auto_min = init_value / tighten_factor
     auto_max = init_value * tighten_factor
 
-    # 用户边界 vs 自适应边界：取更紧的（覆盖范围更小的）
+    # 用户边界 vs 自适应边界:取更紧的
     final_min = max(user_min, auto_min) if user_min is not None else auto_min
     final_max = min(user_max, auto_max) if user_max is not None else auto_max
 
-    # 防护: 防止下界 > 上界
     if final_min >= final_max:
         final_min, final_max = auto_min, auto_max
 
-    # 兜底: 绝不超过 1e-15 ~ 1e15 的全局安全范围
-    final_min = max(final_min, 1e-15)
-    final_max = min(final_max, 1e15)
-
-    return (final_min, final_max)
+    return (max(final_min, 1e-15), min(final_max, 1e15))
 
 
 def _should_use_multi_start(init_params, method, freq=None):
@@ -584,6 +585,81 @@ def _should_use_multi_start(init_params, method, freq=None):
             return True
 
     return False
+
+
+# =============================================================================
+# 5 改进: 多解性检测、失败检测、R1 估算（问题 4/5/6 修复）
+# =============================================================================
+
+def _detect_multi_solution_risk(circuit):
+    """
+    问题 6 修复: 检测电路是否存在多解性风险
+
+    多解性特征:
+        - 多个 p(C, R) 并联结构
+        - 多个独立的 C 参数
+    """
+    if circuit is None:
+        return False
+    circuit_str = ' '.join(str(c) for c in circuit)
+    # 多个 p(...) 嵌套
+    p_count = circuit_str.count('p(')
+    if p_count >= 2:
+        return True
+    return False
+
+
+def _is_fitting_failed(result, init_params, max_error_threshold=0.5):
+    """
+    问题 4 修复: 判断拟合是否失败
+
+    失败特征: 至少一个参数相对误差 > 50%
+    """
+    if result is None or not hasattr(result, 'params'):
+        return True
+    try:
+        errors = []
+        for name in init_params:
+            if name.endswith('_min') or name.endswith('_max'):
+                continue
+            if name not in result.params:
+                continue
+            init_val = init_params[name]
+            fit_val = result.params[name].value
+            if abs(init_val) > 0 and np.isfinite(init_val) and np.isfinite(fit_val):
+                err = abs((fit_val - init_val) / init_val)
+                errors.append(err)
+        if not errors:
+            return False
+        return max(errors) > max_error_threshold
+    except Exception:
+        return True
+
+
+def _estimate_R_at_high_freq(freq, ZData, percentile=10):
+    """
+    问题 5 修复: 从高频段估算串联电阻 R1_est
+
+    高频段实部 ≈ R1 (电容短路, 串联电阻主导)
+    """
+    f_max = freq.max()
+    high_mask = freq > f_max / 10
+    if np.sum(high_mask) < 3:
+        high_mask = freq > f_max / 3
+    if np.sum(high_mask) < 3:
+        return None
+    R_est = np.median(np.real(ZData[high_mask]))
+    return R_est if (R_est > 0 and np.isfinite(R_est)) else None
+
+
+def _compute_magnitude_range(init_params):
+    """计算参数量级差 (log10 单位)"""
+    param_vals = [v for k, v in init_params.items()
+                  if not k.endswith('_min') and not k.endswith('_max')
+                  and v > 0 and np.isfinite(v)]
+    if len(param_vals) < 2:
+        return 0.0
+    return np.log10(max(param_vals)) - np.log10(min(param_vals))
 
 
 def _multi_start_with_R1_constraint(freq, prodata, circuit, init_params,
@@ -749,6 +825,40 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
         # 标准拟合：动态从 init_params 提取参数信息
         pm = Parameters()
 
+        # ====== 问题 6: 多解性场景预判 (弹窗建议全局方法) ======
+        if _detect_multi_solution_risk(circuit) and method in (
+                'nelder', 'powell', 'cg', 'bfgs', 'lbfgsb'):
+            _emit_warning(
+                f"⚠️ 当前电路可能存在多解性，{method} 是局部方法，\n"
+                f"容易陷入局部最优。\n\n"
+                f"建议切换到以下全局方法之一:\n"
+                f"  • differential_evolution (推荐, 稳定)\n"
+                f"  • dual_annealing (快)\n"
+                f"  • ampgo (最准, 但慢)\n"
+                f"\n(继续用 {method} 拟合, 可能得到次优解)"
+            )
+
+        # ====== 问题 5: mΩ-MΩ 量级差 R 物理约束 ======
+        # 在添加参数前先估算 R1_est 并约束 R 参数边界
+        ZData = prodata['Rs[ohm]'].values + 1j * prodata['X[ohm]'].values
+        magnitude_range = _compute_magnitude_range(init_params)
+        if magnitude_range > 5:
+            R1_est = _estimate_R_at_high_freq(freq, ZData)
+            if R1_est is not None:
+                # 自动收紧 R 参数边界
+                R_names = [k for k in init_params
+                           if k.startswith('R') and not k.endswith('_min')
+                           and not k.endswith('_max')]
+                for rn in R_names:
+                    est_min = R1_est * 1e-3
+                    est_max = R1_est * 1e4
+                    cur_min = init_params.get(f'{rn}_min', 1e-15)
+                    cur_max = init_params.get(f'{rn}_max', 1e15)
+                    init_params[f'{rn}_min'] = max(cur_min, est_min)
+                    init_params[f'{rn}_max'] = min(cur_max, est_max)
+                print(f"  [R 物理约束] R1_est={R1_est:.3e}, "
+                      f"范围 [{est_min:.3e}, {est_max:.3e}]")
+
         # 提取所有参数（排除 min/max 后缀）
         # P0-①: 使用 _compute_adaptive_bounds 根据 method 自动收紧全局方法边界
         for key, value in init_params.items():
@@ -760,18 +870,15 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             user_max = init_params.get(f'{key}_max', None)
 
             # P0-①: 调用自适应边界计算
-            #   - 局部方法 (LS/LBFGSB/Powell/CG/BFGS/Nelder) 保持 1e-15~1e15
-            #   - 全局方法 (DE/DA/BH/AMPGO) 自动收紧到 init/1000~init*1000
+            #   - 局部方法 (LS/LBFGSB/CG/BFGS) 保持 1e-15~1e15
+            #   - 半全局方法 (Nelder/Powell) 收紧到 init/100~init*100  (问题 2)
+            #   - 全局方法 (DE/DA/AMPGO) 收紧到 init/1000~init*1000
             min_val, max_val = _compute_adaptive_bounds(
                 value, method,
                 user_min=user_min, user_max=user_max,
-                tighten_factor=1000.0
             )
 
             pm.add(key, value=value, min=min_val, max=max_val)
-
-        # 执行拟合
-        ZData = prodata['Rs[ohm]'].values + 1j * prodata['X[ohm]'].values
 
         # 仅 least_squares 专属，绝不能透传给 minimize/DE/DA/...
         LS_ONLY = {'ftol', 'xtol', 'gtol', 'tr_solver', 'diff_step'}
@@ -794,8 +901,7 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
                    'tr_solver': 'lsmr', 'diff_step': 1e-15}
             )
             result = minner.minimize(method='least_squares')
-        elif method in ('differential_evolution', 'dual_annealing',
-                        'basinhopping', 'ampgo'):
+        elif method in ('differential_evolution', 'dual_annealing', 'ampgo'):
             # P1: 多解性/极值量级场景下,自动使用多起点 + R1 物理约束
             if _should_use_multi_start(init_params, method, freq):
                 multi_result = _multi_start_with_R1_constraint(
@@ -835,6 +941,34 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             )
             result = minner.minimize(method=method)
 
+        # ====== 问题 4: 拟合后失败检测 (局部方法失败自动降级) ======
+        if (method in ('lbfgsb', 'cg', 'bfgs', 'powell', 'nelder')
+                and _is_fitting_failed(result, init_params)):
+            _emit_warning(
+                f"⚠️ {method} 拟合结果异常（参数最大误差 > 50%），\n"
+                f"可能陷入局部最优。\n\n"
+                f"建议自动降级到 differential_evolution 重试。"
+            )
+            print(f"  [自动降级] {method} → differential_evolution")
+            # 用 DE 重试
+            try:
+                de_pm = Parameters()
+                for key, value in init_params.items():
+                    if key.endswith('_min') or key.endswith('_max'):
+                        continue
+                    umin = init_params.get(f'{key}_min', None)
+                    umax = init_params.get(f'{key}_max', None)
+                    mn, mx = _compute_adaptive_bounds(
+                        value, 'differential_evolution',
+                        user_min=umin, user_max=umax)
+                    de_pm.add(key, value=value, min=mn, max=mx)
+                de_minner = Minimizer(
+                    fcn2min, de_pm, fcn_args=(freq, circuit, ZData),
+                    max_nfev=int(1e5))
+                result = de_minner.minimize(method='differential_evolution')
+            except Exception as e:
+                print(f"  [降级失败] {e}")
+
         return {
             'result': result,
             'method': 'standard',
@@ -863,7 +997,7 @@ def auto_fitting(params, freq, circuit, prodata, method='least_squares', **fit_k
     init_params = {}
     for name, param in params.items():
         init_params[name] = param.value
-        # 收紧 ±inf 兜底，避免 differential_evolution/dual_annealing/basinhopping 抛
+        # 收紧 ±inf 兜底，避免 differential_evolution/dual_annealing 抛
         # 'requires finite bound for all varying parameters'
         pmin = param.min if np.isfinite(param.min) else 1e-15
         pmax = param.max if np.isfinite(param.max) else 1e15

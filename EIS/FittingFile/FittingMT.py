@@ -117,8 +117,7 @@ def FittingMT(params,freq,modelterm,prodata,option,method='least_squares',**fit_
                'ftol': 1e-10, 'xtol': 1e-10, 'gtol': 1e-10,
                'loss': 'soft_l1', 'max_nfev': int(1e5), 'diff_step': 1e-8}
         )
-    elif method in ('differential_evolution', 'dual_annealing',
-                    'basinhopping', 'ampgo'):
+    elif method in ('differential_evolution', 'dual_annealing', 'ampgo'):
         # 进化/全局方法：参数直传给 scipy 对应函数（不接受 options=）
         # max_nfev 必须是 int（scipy 用作 maxiter）
         direct_kwargs = {k: v for k, v in safe_kwargs.items() if k not in OPTIONS_KEYS}
