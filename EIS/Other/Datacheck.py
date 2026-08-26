@@ -224,5 +224,71 @@ def check5(data):  #判断数据类型
 ##################################数据检查#############################
 
 
+##################################成对化工具#############################
+def ensure_paired_form(selectlist, plotdataname, plotdata, dataInfo=None):
+    """
+    数据成对化工具
+    让所有上游 sendsignal 输出一致的 [(原始, 合成), ...] 形式,
+    下游(Figure/selectsavedata)统一按奇偶索引处理。
+    名字保持原样(不加重命名),仅在 dataInfo 的合成侧加 'synthetic': True 标记。
 
+    入参(顺序与下游 emit 保持一致):
+        selectlist    : list[int]      0/1 勾选标记
+        plotdataname  : list[str]      数据名
+        plotdata      : list[DataFrame]  数据
+        dataInfo      : list[dict]|None 元信息(可选)
 
+    行为:
+        - 已是成对形式(检测到奇数位 dataInfo 含 'synthetic': True)→ 透传
+        - 否则:每条复制成 (original, synthetic_copy) 两条,
+          合成侧带 'synthetic': True 标记,DataFrame 引用与原始同对象
+    """
+    if dataInfo is None:
+        dataInfo = [{}] * len(plotdata)
+
+    # 关键修复:dataInfo 可能比 plotdata 短(Input 模块始终传空列表)
+    # 如果不补齐,zip() 会截断到最短列表长度,导致输出全空
+    if len(dataInfo) < len(plotdata):
+        dataInfo = list(dataInfo) + [{}] * (len(plotdata) - len(dataInfo))
+
+    # 已是成对形式 → 透传
+    if (len(plotdata) > 0
+            and len(plotdata) % 2 == 0
+            and any(isinstance(info, dict) and info.get('synthetic', False)
+                    for info in dataInfo[1::2])):
+        # 关键修复:selectlist 可能比 plotdataname 短(fresh() 重置了 selectlist 长度)
+        # 透传时也要把 selectlist 复制成对,保持 4 个列表等长
+        if len(selectlist) < len(plotdataname):
+            paired_selectlist = []
+            for flag in selectlist:
+                paired_selectlist.append(flag)
+                paired_selectlist.append(flag)
+            return paired_selectlist, list(plotdataname), list(plotdata), list(dataInfo)
+        return list(selectlist), list(plotdataname), list(plotdata), list(dataInfo)
+
+    # 否则:每条复制成 2 条,名字保持原样
+    new_selectlist, new_names, new_plots, new_infos = [], [], [], []
+    for i, (flag, name, df, info) in enumerate(zip(
+            selectlist, plotdataname, plotdata, dataInfo)):
+        # 原始侧
+        new_selectlist.append(flag)
+        new_names.append(name)
+        new_plots.append(df)
+        new_infos.append(info if isinstance(info, dict) else {})
+
+        # 合成侧(同对象引用,带 synthetic 标记)
+        new_selectlist.append(flag)
+        new_names.append(name)
+        new_plots.append(df)
+        synth_info = dict(info) if isinstance(info, dict) else {}
+        synth_info['synthetic'] = True
+        new_infos.append(synth_info)
+
+    # 调试输出:辅助代码检查(已注释,问题修复后不再需要)
+    # print(new_selectlist)
+    # print(new_names)
+    # print(new_plots)
+    # print(new_infos)
+
+    return new_selectlist, new_names, new_plots, new_infos
+##################################成对化工具#############################

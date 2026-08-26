@@ -22,6 +22,7 @@ from EIS.SimulationFile.simulateECM import simuECM,circuitfig,creatdatabaseECM
 from EIS.SimulationFile.simulateMT import simulateModel
 from EIS.ModelFile.ECMFunctions import ECMFunction
 from EIS.ModelFile.MTMFunctions import MTMFunction
+from EIS.Other.Datacheck import ensure_paired_form
 
 
 
@@ -137,6 +138,15 @@ class Simu(ECMFunction, MTMFunction, PyTabWidget2):
         outputdata =plotdata
         outputlist =outputlist
         dataInfo = message4
+
+        # 将单条数据成对化,让下游 selectsavedata 的 i%2 逻辑可工作
+        # 注意:utility 返回新列表,需要把别名也同步更新,否则 emit 的还是旧数据
+        outputlist, outputdataname, outputdata, dataInfo = ensure_paired_form(
+            outputlist,
+            outputdataname,
+            outputdata,
+            dataInfo,
+        )
 
         self.datasignal.emit(outputlist ,outputdataname ,outputdata ,dataInfo)####发送数据
         # print('Simulation Data emitted'  )###输出到状态栏

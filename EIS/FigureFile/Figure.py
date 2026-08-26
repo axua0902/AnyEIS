@@ -68,6 +68,10 @@ class FigWidget(QWidget ,FigureUI):
         # 初始化按钮状态
         self.selectionchange()
 
+        # 默认:Original/Processed checkbox 可用(Processing/Fitting 页面)
+        # Plotting 页面(纯 Input)会调用 set_processing_state_enabled(False) 关闭它们
+        self._processing_state_enabled = True
+
 
 
 
@@ -154,87 +158,123 @@ class FigWidget(QWidget ,FigureUI):
 
 
 
+    def _filter_synthetic_for_display(self, outputlist, plotdataname, plotdata, message):
+        """
+        过滤掉 message 中带 synthetic 标记的条目,只用于绘图。
+        saveasexcel/selectsavedata 仍使用完整列表(2 条都参与 i%2 判定)。
+        """
+        if not message or len(message) != len(plotdata):
+            # 没有 message 或长度不匹配 → 不过滤,直接返回全部
+            return outputlist, plotdataname, plotdata
+        keep_indices = [
+            i for i, info in enumerate(message)
+            if not (isinstance(info, dict) and info.get('synthetic', False))
+        ]
+        return (
+            [outputlist[i] for i in keep_indices],
+            [plotdataname[i] for i in keep_indices],
+            [plotdata[i] for i in keep_indices],
+        )
+
     def drawfigure(self):
         self.clearfigure()
         self.mpl.fig.clear()
-        
-        data_type = self.figuregui.datatypeComboBox.currentText()
-        
-        if data_type == 'f-Z,Phase,Re(Z),Im(Z)':
-            # 获取被选中的按钮
-            main_buttons = [
-                ('Nyquist', self.figuregui.NyquistOption),
-                ('BodeRe', self.figuregui.BodeReOption),
-                ('BodeIm', self.figuregui.BodeImOption),
-                ('BodePhy', self.figuregui.BodePhyOption)
-            ]
-            checked_buttons = [name for name, button in main_buttons if button.isChecked()]
-            checked_count = len(checked_buttons)
-            
-            if self.figuregui.AllOption.isChecked() or checked_count == 4:
-                self.mpl.plotZall(self.outputlist, self.plotdataname, self.plotdata)
-            elif checked_count == 1:
-                figpos = 111
-                self._plot_figure(checked_buttons[0], figpos, data_type=data_type)
-            elif checked_count == 2:
-                figposup = 211
-                figposdown = 212
-                self._plot_figure(checked_buttons[0], figposup, data_type=data_type)
-                self._plot_figure(checked_buttons[1], figposdown, data_type=data_type)
-            elif checked_count == 3:
-                # 左侧上下各一幅图，右侧一幅图
-                figpos_left_up = 221
-                figpos_left_down = 223
-                figpos_right = 122
-                self._plot_figure(checked_buttons[0], figpos_left_up, data_type=data_type)
-                self._plot_figure(checked_buttons[1], figpos_left_down, data_type=data_type)
-                self._plot_figure(checked_buttons[2], figpos_right, data_type=data_type)
-            else:
-                # 默认绘制所有图表
-                self.mpl.plotZall(self.outputlist, self.plotdataname, self.plotdata)
 
-        elif data_type == 'f-Epsilon,Sigma':
-            # 获取被选中的按钮
-            main_buttons = [
-                ('Nyquist', self.figuregui.NyquistOption),
-                ('BodeRe', self.figuregui.BodeReOption),
-                ('BodeIm', self.figuregui.BodeImOption),
-                ('BodePhy', self.figuregui.BodePhyOption)
-            ]
-            checked_buttons = [name for name, button in main_buttons if button.isChecked()]
-            checked_count = len(checked_buttons)
-            
-            if self.figuregui.AllOption.isChecked() or checked_count == 4:
-                self.mpl.plotEpsall(self.outputlist, self.plotdataname, self.plotdata)
-            elif checked_count == 1:
-                figpos = 111
-                self._plot_figure(checked_buttons[0], figpos, data_type=data_type)
-            elif checked_count == 2:
-                figposup = 211
-                figposdown = 212
-                self._plot_figure(checked_buttons[0], figposup, data_type=data_type)
-                self._plot_figure(checked_buttons[1], figposdown, data_type=data_type)
-            elif checked_count == 3:
-                # 左侧上下各一幅图，右侧一幅图
-                figpos_left_up = 221
-                figpos_left_down = 223
-                figpos_right = 122
-                self._plot_figure(checked_buttons[0], figpos_left_up, data_type=data_type)
-                self._plot_figure(checked_buttons[1], figpos_left_down, data_type=data_type)
-                self._plot_figure(checked_buttons[2], figpos_right, data_type=data_type)
+        # 临时替换 self.outputlist/plotdataname/plotdata 为过滤掉 synthetic 的版本,
+        # 画图结束后用 finally 恢复,这样下游 saveasexcel/selectsavedata 仍看到完整列表
+        outputlist_draw, plotdataname_draw, plotdata_draw = self._filter_synthetic_for_display(
+            self.outputlist, self.plotdataname, self.plotdata, self.message
+        )
+        saved_outputlist, saved_plotdataname, saved_plotdata = (
+            self.outputlist, self.plotdataname, self.plotdata
+        )
+        self.outputlist, self.plotdataname, self.plotdata = (
+            outputlist_draw, plotdataname_draw, plotdata_draw
+        )
+
+        try:
+            data_type = self.figuregui.datatypeComboBox.currentText()
+
+            if data_type == 'f-Z,Phase,Re(Z),Im(Z)':
+                # 获取被选中的按钮
+                main_buttons = [
+                    ('Nyquist', self.figuregui.NyquistOption),
+                    ('BodeRe', self.figuregui.BodeReOption),
+                    ('BodeIm', self.figuregui.BodeImOption),
+                    ('BodePhy', self.figuregui.BodePhyOption)
+                ]
+                checked_buttons = [name for name, button in main_buttons if button.isChecked()]
+                checked_count = len(checked_buttons)
+
+                if self.figuregui.AllOption.isChecked() or checked_count == 4:
+                    self.mpl.plotZall(self.outputlist, self.plotdataname, self.plotdata)
+                elif checked_count == 1:
+                    figpos = 111
+                    self._plot_figure(checked_buttons[0], figpos, data_type=data_type)
+                elif checked_count == 2:
+                    figposup = 211
+                    figposdown = 212
+                    self._plot_figure(checked_buttons[0], figposup, data_type=data_type)
+                    self._plot_figure(checked_buttons[1], figposdown, data_type=data_type)
+                elif checked_count == 3:
+                    # 左侧上下各一幅图,右侧一幅图
+                    figpos_left_up = 221
+                    figpos_left_down = 223
+                    figpos_right = 122
+                    self._plot_figure(checked_buttons[0], figpos_left_up, data_type=data_type)
+                    self._plot_figure(checked_buttons[1], figpos_left_down, data_type=data_type)
+                    self._plot_figure(checked_buttons[2], figpos_right, data_type=data_type)
+                else:
+                    # 默认绘制所有图表
+                    self.mpl.plotZall(self.outputlist, self.plotdataname, self.plotdata)
+
+            elif data_type == 'f-Epsilon,Sigma':
+                # 获取被选中的按钮
+                main_buttons = [
+                    ('Nyquist', self.figuregui.NyquistOption),
+                    ('BodeRe', self.figuregui.BodeReOption),
+                    ('BodeIm', self.figuregui.BodeImOption),
+                    ('BodePhy', self.figuregui.BodePhyOption)
+                ]
+                checked_buttons = [name for name, button in main_buttons if button.isChecked()]
+                checked_count = len(checked_buttons)
+
+                if self.figuregui.AllOption.isChecked() or checked_count == 4:
+                    self.mpl.plotEpsall(self.outputlist, self.plotdataname, self.plotdata)
+                elif checked_count == 1:
+                    figpos = 111
+                    self._plot_figure(checked_buttons[0], figpos, data_type=data_type)
+                elif checked_count == 2:
+                    figposup = 211
+                    figposdown = 212
+                    self._plot_figure(checked_buttons[0], figposup, data_type=data_type)
+                    self._plot_figure(checked_buttons[1], figposdown, data_type=data_type)
+                elif checked_count == 3:
+                    # 左侧上下各一幅图,右侧一幅图
+                    figpos_left_up = 221
+                    figpos_left_down = 223
+                    figpos_right = 122
+                    self._plot_figure(checked_buttons[0], figpos_left_up, data_type=data_type)
+                    self._plot_figure(checked_buttons[1], figpos_left_down, data_type=data_type)
+                    self._plot_figure(checked_buttons[2], figpos_right, data_type=data_type)
+                else:
+                    # 默认绘制所有图表
+                    self.mpl.plotEpsall(self.outputlist, self.plotdataname, self.plotdata)
+
+            elif data_type == "Time order":
+                if self.figuregui.timeorderOption.isChecked():
+                    # 使用统一的plotNormal函数,自动布局
+                    self.mpl.plotNormal(self.outputlist, self.plotdataname, self.plotdata)
             else:
-                # 默认绘制所有图表
-                self.mpl.plotEpsall(self.outputlist, self.plotdataname, self.plotdata)
-                
-        elif data_type == "Time order":
-            if self.figuregui.timeorderOption.isChecked():
-                # 使用统一的plotNormal函数，自动布局
-                self.mpl.plotNormal(self.outputlist, self.plotdataname, self.plotdata)
-        else:
-            # General 或其他情况
-            if self.figuregui.normalOption.isChecked():
-                # 使用统一的plotNormal函数，自动布局
-                self.mpl.plotNormal(self.outputlist, self.plotdataname, self.plotdata)
+                # General 或其他情况
+                if self.figuregui.normalOption.isChecked():
+                    # 使用统一的plotNormal函数,自动布局
+                    self.mpl.plotNormal(self.outputlist, self.plotdataname, self.plotdata)
+        finally:
+            # 恢复原始数据,确保 saveasexcel/selectsavedata 看到完整列表
+            self.outputlist, self.plotdataname, self.plotdata = (
+                saved_outputlist, saved_plotdataname, saved_plotdata
+            )
 
 
 
