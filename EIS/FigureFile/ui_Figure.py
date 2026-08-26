@@ -142,7 +142,7 @@ class FigureUI():
             border_width=2,
             border_radius=3
         )
-        self.origindataCheckBox.setChecked(False)
+        self.origindataCheckBox.setChecked(True)
         self.dataProcessingStateLayout.addWidget(self.origindataCheckBox)
         
         self.processeddataCheckBox = PyCheckBox2(
@@ -160,7 +160,7 @@ class FigureUI():
             border_width=2,
             border_radius=3
         )
-        self.processeddataCheckBox.setChecked(False)
+        self.processeddataCheckBox.setChecked(True)
         self.dataProcessingStateLayout.addWidget(self.processeddataCheckBox)
         self.dataProcessingStateLayout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 

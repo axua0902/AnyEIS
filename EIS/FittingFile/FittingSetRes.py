@@ -152,9 +152,15 @@ class resultWidget(QWidget):  ############输出仿真结果
             if inputdata and len(inputdata) > fitted_index:
                 fitted_dict = inputdata[fitted_index]
                 print(f"[getsingal] inputdata[{fitted_index}]类型: {type(fitted_dict)}")
-                if hasattr(fitted_dict, 'columns') and 'Rs[ohm]' in fitted_dict.columns:
-                    Z_fitted = fitted_dict['Rs[ohm]'].values + 1j * fitted_dict['X[ohm]'].values
-                    print(f"[getsingal] Z_fitted构建成功: {Z_fitted[:3]}...")
+                if hasattr(fitted_dict, 'columns'):
+                    if 'Rs[ohm]' in fitted_dict.columns:
+                        # ECM 数据格式
+                        Z_fitted = fitted_dict['Rs[ohm]'].values + 1j * fitted_dict['X[ohm]'].values
+                        print(f"[getsingal] Z_fitted(ECM)构建成功: {Z_fitted[:3]}...")
+                    elif 'epsRE[-]' in fitted_dict.columns:
+                        # MT 数据格式
+                        Z_fitted = fitted_dict['epsRE[-]'].values + 1j * fitted_dict['sigmaRE[S/m]'].values
+                        print(f"[getsingal] Z_fitted(MT)构建成功: {Z_fitted[:3]}...")
 
             self.update_overall_results_table(fittedresults[dataset_index], Z_data, Z_fitted, dataset_index)
 

@@ -52,10 +52,14 @@ class FigWidget(QWidget ,FigureUI):
         self.figuregui.clearbtn.clicked.connect(self.clearfigure)
         self.figuregui.toolbtn.clicked.connect(self.toolbar)
         self.figuregui.PaperFigurebtn.clicked.connect(self.PaperFigure)
-        
+
         self.figuregui.datatypeComboBox.currentIndexChanged.connect(self.selectionchange)
         self.figuregui.savebtn.clicked.connect(self.saveasexcel)
         self.figuregui.openExcelbtn.clicked.connect(self.OpenExcelFiles)
+
+        # Original/Processed 复选框状态变化时自动重绘(Filter/Processing/Fitting 模式)
+        self.figuregui.origindataCheckBox.stateChanged.connect(self._on_processing_state_changed)
+        self.figuregui.processeddataCheckBox.stateChanged.connect(self._on_processing_state_changed)
 
         self.figuregui.userdefine1btn.clicked.connect(lambda: userdefine1(self))
         self.figuregui.userdefine2btn.clicked.connect(lambda: userdefine2(self))
@@ -72,19 +76,43 @@ class FigWidget(QWidget ,FigureUI):
         # Plotting 页面(纯 Input)会调用 set_processing_state_enabled(False) 关闭它们
         self._processing_state_enabled = True
 
+        # 默认:绘图时显示 synthetic 数据(Filter/Processing/Fitting 行为)
+        # Plotting 页面会通过 set_processing_state_enabled(False) 同步关闭它
+        self._display_synthetic = True
+
     def set_processing_state_enabled(self, enabled):
         """
         控制 Original / Processed 复选框的可用性。
         Input/Simulation 模式下传入 False,关闭这两个无意义的复选框;
         Processing/Fitting 模式下保持 True(默认)。
+        同步联动 _display_synthetic:关闭复选框时也隐藏 synthetic 曲线。
         """
         self._processing_state_enabled = enabled
+        self._display_synthetic = enabled
         self.figuregui.origindataCheckBox.setEnabled(enabled)
         self.figuregui.processeddataCheckBox.setEnabled(enabled)
         # 禁用时同时取消勾选,避免残留状态影响后续保存逻辑
         if not enabled:
             self.figuregui.origindataCheckBox.setChecked(False)
             self.figuregui.processeddataCheckBox.setChecked(False)
+
+    def set_display_synthetic(self, enabled):
+        """
+        单独控制绘图时是否显示 synthetic(合成/处理后)数据。
+        True  → 同时绘制原始和处理后曲线(Filter/Processing/Fitting)
+        False → 只绘制原始曲线(Input/Simulation,避免与原始重叠)
+        """
+        self._display_synthetic = enabled
+
+    def _on_processing_state_changed(self):
+        """
+        Original/Processed 复选框状态变化时的槽函数:
+        - Filter/Processing/Fitting 模式下:立即重绘图窗以反映新选择
+        - Input/Simulation 模式下:复选框被禁用,此槽不会被触发
+        """
+        if getattr(self, '_processing_state_enabled', True) and self.plotdata:
+            # 已有数据才重绘(避免初始化时的空重绘)
+            self.drawfigure()
 
 
 
@@ -174,16 +202,44 @@ class FigWidget(QWidget ,FigureUI):
 
     def _filter_synthetic_for_display(self, outputlist, plotdataname, plotdata, message):
         """
-        过滤掉 message 中带 synthetic 标记的条目,只用于绘图。
-        saveasexcel/selectsavedata 仍使用完整列表(2 条都参与 i%2 判定)。
+        根据当前页面模式和复选框状态过滤要显示的条目。
+        - Input/Simulation 模式(_display_synthetic=False):过滤掉 synthetic
+        - Filter/Processing/Fitting 模式(_display_synthetic=True):按复选框状态决定
+            - Original 勾选:保留偶数位(原始)
+            - Processed 勾选:保留奇数位(处理后)
+            - 两个都勾选:全部保留
+        saveasexcel/selectsavedata 不调用此方法,仍使用完整列表。
         """
+        # Input/Simulation 模式:强制隐藏 synthetic
+        if not getattr(self, '_display_synthetic', True):
+            if not message or len(message) != len(plotdata):
+                return outputlist, plotdataname, plotdata
+            keep_indices = [
+                i for i, info in enumerate(message)
+                if not (isinstance(info, dict) and info.get('synthetic', False))
+            ]
+            return (
+                [outputlist[i] for i in keep_indices],
+                [plotdataname[i] for i in keep_indices],
+                [plotdata[i] for i in keep_indices],
+            )
+
+        # Filter/Processing/Fitting 模式:按 Original/Processed 复选框状态过滤
+        show_orig = self.figuregui.origindataCheckBox.isChecked()
+        show_proc = self.figuregui.processeddataCheckBox.isChecked()
+
+        # 没有 message 或长度不匹配 → 不做基于 synthetic 的过滤
         if not message or len(message) != len(plotdata):
-            # 没有 message 或长度不匹配 → 不过滤,直接返回全部
             return outputlist, plotdataname, plotdata
-        keep_indices = [
-            i for i, info in enumerate(message)
-            if not (isinstance(info, dict) and info.get('synthetic', False))
-        ]
+
+        keep_indices = []
+        for i, info in enumerate(message):
+            is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
+            if is_synthetic and show_proc:
+                keep_indices.append(i)
+            elif (not is_synthetic) and show_orig:
+                keep_indices.append(i)
+
         return (
             [outputlist[i] for i in keep_indices],
             [plotdataname[i] for i in keep_indices],

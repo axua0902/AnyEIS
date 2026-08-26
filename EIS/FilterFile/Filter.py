@@ -44,6 +44,10 @@ from EIS.FigureFile.Plotfun import save_publication_figure,create_academic_canva
 class Datafilter(QWidget, DatafilterUI):
     Apdatasignal = Signal(list, list, list, list)
 
+    # 处理后数据名称后缀(链式处理时会追加,例如 Filter 后再 Processing 会得到 _Filtered_Processed)
+    # 命名习惯:Input 用原名,Filter 用 _Filtered,Processing 用 _Processed,Fitting 用 _Fitted
+    _processed_suffix = '_Filtered'
+
     def __init__(self, parent=None):
         super(Datafilter, self).__init__(parent)
         ########变量申明###############
@@ -78,12 +82,20 @@ class Datafilter(QWidget, DatafilterUI):
         self.prodataname = []          # 输入数据名称列表
         self.prodata = []              # 输入数据列表
         self.dataInfo = []             # 输入数据信息
-        
+
+        # 原始数据(从 2N 成对中提取的 N 条,供滤波函数使用)
+        # 与 ensure_paired_form 协议兼容:配对格式则取偶数索引
+        self.original_prodata = []         # 原始 DataFrame 列表(N 条)
+        self.original_prodataname = []     # 原始名称列表(N 条)
+        self.original_selectlist = []       # 原始选择标记(N 条)
+        self.original_dataInfo = []         # 原始 dataInfo(N 条,无 synthetic 标签)
+
         # Processed/Output data
         self.resultsselectlist = []   # 输出数据选择列表
         self.resultsdata = []         # 输出数据列表
         self.resultsdataname = []     # 输出数据名称列表
-        
+        self.resultsdataInfo = []     # 输出 dataInfo(2N 条,奇数位带 synthetic 标签)
+
         # Reference data
         self.refdata = []
         self.refdataname = []
@@ -96,8 +108,39 @@ class Datafilter(QWidget, DatafilterUI):
         self.prodataname = inputdataname.copy() if inputdataname else []
         self.prodata = inputdata.copy() if inputdata else []
         self.dataInfo = inputmessage.copy() if inputmessage else []
-        print('FIlter get data',self.selectlist, self.prodataname, len(self.prodata))
+        # 提取原始数据(从 2N 成对 → N),供后续滤波使用
+        self._extract_original_data()
+        print('FIlter get data',self.selectlist, self.prodataname, len(self.prodata),
+              '| original N=', len(self.original_prodata))
         self.auto_forward_data()
+
+    def _extract_original_data(self):
+        """
+        从 self.prodata(2N 成对 或 N 单条)中提取原始数据(N 条,不含合成副本)。
+        配对格式(2N + 奇数位带 synthetic 标签):只取偶数索引
+        非配对格式(N):全部保留
+        """
+        n = len(self.prodata)
+        if (n > 0
+                and n % 2 == 0
+                and self.dataInfo
+                and len(self.dataInfo) == n
+                and any(isinstance(info, dict) and info.get('synthetic', False)
+                        for info in self.dataInfo[1::2])):
+            # 配对格式:只取偶数索引
+            self.original_prodata = [self.prodata[i] for i in range(0, n, 2)]
+            self.original_prodataname = [self.prodataname[i] for i in range(0, n, 2)]
+            self.original_selectlist = [self.selectlist[i] for i in range(0, n, 2)]
+            self.original_dataInfo = [self.dataInfo[i] for i in range(0, n, 2)]
+        else:
+            # 非配对格式:全部保留(并补齐 dataInfo)
+            self.original_prodata = list(self.prodata)
+            self.original_prodataname = list(self.prodataname)
+            self.original_selectlist = list(self.selectlist)
+            if self.dataInfo and len(self.dataInfo) == n:
+                self.original_dataInfo = list(self.dataInfo)
+            else:
+                self.original_dataInfo = [{}] * n
 
 
     def sendsignal(self, outputselectlist, outputdataname, outputdata, outputmessage):
@@ -112,10 +155,14 @@ class Datafilter(QWidget, DatafilterUI):
                 # 如果启用了处理功能，等待用户手动处理
                 print("Processing enabled - waiting for manual processing")
             else:
-                # 如果未启用处理功能，自动转发原始数据
+                # 如果未启用处理功能,自动转发原始数据(N 条,不含合成副本)
                 print("Processing disabled - auto-forwarding original data")
-                self.sendsignal(self.selectlist.copy(), self.prodataname.copy(), 
-                            self.prodata.copy(), self.dataInfo.copy())
+                self.sendsignal(
+                    list(self.original_selectlist),
+                    list(self.original_prodataname),
+                    list(self.original_prodata),
+                    list(self.original_dataInfo)
+                )
 
 
     ##################################数据检查#############################
@@ -272,12 +319,12 @@ class Datafilter(QWidget, DatafilterUI):
         
             
         if self.filterui.filterCheckBox.isChecked() == 0:
-            # 不进行滤波处理，直接输出原始数据
+            # 不进行滤波处理,只输出原始数据(N 条,不含合成副本)
             print('Filter disabled - outputting original data')
-            outputselectlist = self.selectlist.copy()
-            outputdataname = self.prodataname.copy()
-            outputdata = self.prodata.copy()
-            outputmessage = self.dataInfo.copy()
+            outputselectlist = list(self.original_selectlist)
+            outputdataname = list(self.original_prodataname)
+            outputdata = list(self.original_prodata)
+            outputmessage = list(self.original_dataInfo)
             self.sendsignal(outputselectlist, outputdataname, outputdata, outputmessage)
             return
         else:
@@ -313,17 +360,17 @@ class Datafilter(QWidget, DatafilterUI):
             parameter = {'a': self.filterui.filterp1TextEdit.text(), 'b': self.filterui.filterp2TextEdit.text()}
             filteresults = savgol(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'Median':
             parameter = {'kernel_size': self.filterui.filterp1TextEdit.text()}
             filteresults = median(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'Wiener':
             parameter = {'noise': self.filterui.filterp1TextEdit.text() if self.filterui.filterp1TextEdit.text() else None}
             filteresults = wiener(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'Butterworth':
             parameter = {
                 'order': self.filterui.filterp1TextEdit.text(),
@@ -332,27 +379,27 @@ class Datafilter(QWidget, DatafilterUI):
             }
             filteresults = butterworth(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'Cubic spline':
             parameter = {'lamb': self.filterui.filterp1TextEdit.text()}
             filteresults = cspline(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'ArithmeticAverage':
             parameter = {'window_size': self.filterui.filterp1TextEdit.text()}
             filteresults = arithmeticAverage(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'SlidingAverage':
             parameter = {'window_size': self.filterui.filterp1TextEdit.text()}
             filteresults = slidingAverage(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'MedianAverage':
             parameter = {'window_size': self.filterui.filterp1TextEdit.text()}
             filteresults = medianAverage(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'AmplitudeLimitingAverage':
             parameter = {
                 'window_size': self.filterui.filterp1TextEdit.text(),
@@ -360,22 +407,22 @@ class Datafilter(QWidget, DatafilterUI):
             }
             filteresults = amplitudeLimitingAverage(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'FirstOrderLag':
             parameter = {'alpha': self.filterui.filterp1TextEdit.text()}
             filteresults = firstOrderLag(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'WeightedAverage':
             parameter = {'window_size': self.filterui.filterp1TextEdit.text()}
             filteresults = weightedAverage(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'ShakeOff':
             parameter = {'threshold_count': self.filterui.filterp1TextEdit.text()}
             filteresults = shakeOff(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         elif currentmethod == 'AmplitudeLimitingShakeOff':
             parameter = {
                 'amplitude_limit': self.filterui.filterp1TextEdit.text(),
@@ -383,7 +430,7 @@ class Datafilter(QWidget, DatafilterUI):
             }
             filteresults = amplitudeLimitingShakeOff(self.prodata, parameter)
             self.databasecreat(filteresults)
-            
+
         else:
             print(f'Unknown filter method: {currentmethod}')
             pass
@@ -717,63 +764,92 @@ class Datafilter(QWidget, DatafilterUI):
 
     ##############################功能#############################
     def databasecreat(self, filteresults):
-        """创建输出数据库：将原始数据和滤波结果组合"""
-        
-        # 验证输入数据
-        if not filteresults or len(filteresults) != len(self.prodata):
-            print(f'Error: Filter results length ({len(filteresults) if filteresults else 0}) does not match input data length ({len(self.prodata)})')
+        """
+        创建输出数据库:严格 2N 成对形式
+        - 偶数位(2i): 原始数据,无 synthetic 标签
+        - 奇数位(2i+1): 滤波结果,dataInfo 带 synthetic:True 标签
+        名字保持原样(链式处理时仅追加自身后缀,与 Input 协议一致)。
+
+        filteresults 自适应处理:
+        - 配对格式(self.prodata 2N + 奇数位带 synthetic 标签):取前 N 作为"真实滤波结果"
+        - 非配对格式(self.prodata N):全部作为滤波结果
+        这样不需要在 filterring 中区分 self.prodata / self.original_prodata。
+        """
+        n_pro = len(self.prodata)
+
+        # 配对格式检测:2N + dataInfo 奇数位带 synthetic 标签
+        is_paired = (
+            n_pro > 0
+            and n_pro % 2 == 0
+            and self.dataInfo
+            and len(self.dataInfo) == n_pro
+            and any(isinstance(info, dict) and info.get('synthetic', False)
+                    for info in self.dataInfo[1::2])
+        )
+
+        if is_paired:
+            n = n_pro // 2
+            # 原始数据(偶数索引)
+            orig_data = [self.prodata[i] for i in range(0, n_pro, 2)]
+            orig_name = [self.prodataname[i] for i in range(0, n_pro, 2)]
+            orig_select = [self.selectlist[i] for i in range(0, n_pro, 2)]
+            orig_info_list = [self.dataInfo[i] for i in range(0, n_pro, 2)]
+            # 真实滤波结果(前 N 条,因为 filterring 对全 2N 滤波,后 N 条是副本滤波)
+            if filteresults and len(filteresults) == n_pro:
+                real_filtered = filteresults[:n]
+            else:
+                # 'Choose Method' 等情况:filteresults == self.prodata,直接用前 N
+                real_filtered = orig_data if (filteresults is self.prodata) else (
+                    list(filteresults) if filteresults else orig_data
+                )
+        else:
+            # 非配对格式:全部使用
+            n = n_pro
+            orig_data = list(self.prodata)
+            orig_name = list(self.prodataname)
+            orig_select = list(self.selectlist)
+            orig_info_list = list(self.dataInfo) if self.dataInfo else [{}] * n
+            real_filtered = list(filteresults) if filteresults else list(self.prodata)
+
+        if not real_filtered or len(real_filtered) != n:
+            print(f'Error: Filter results length ({len(real_filtered) if real_filtered else 0}) '
+                  f'does not match expected length ({n})')
             return
-        
-        # 清空输出数据（但不清空输入数据）
+
+        # 清空输出
         self.resultsdata = []
         self.resultsdataname = []
         self.resultsselectlist = []
-        
-        # 组合原始数据和滤波结果
-        for i in range(0, len(self.prodata)):
-            # 添加原始数据
-            self.resultsdata.append(self.prodata[i])
-            self.resultsdataname.append('Origin_' + self.prodataname[i])
-            self.resultsselectlist.append(self.selectlist[i])
-            
-            # 添加滤波后的数据
-            self.resultsdata.append(filteresults[i])
-            self.resultsdataname.append('Filtered_' + self.prodataname[i])
-            self.resultsselectlist.append(self.selectlist[i])
-        
+        self.resultsdataInfo = []
+
+        for i in range(n):
+            # 偶数位: 原始数据(去除任何 synthetic 残留标签,名称保持原样)
+            self.resultsdata.append(orig_data[i])
+            self.resultsdataname.append(orig_name[i])
+            self.resultsselectlist.append(orig_select[i] if i < len(orig_select) else 0)
+            orig_info = orig_info_list[i].copy() if isinstance(orig_info_list[i], dict) else {}
+            orig_info.pop('synthetic', None)
+            self.resultsdataInfo.append(orig_info)
+
+            # 奇数位: 滤波结果(带 synthetic 标签 + 滤波方法信息)
+            # 命名:在原名后追加 _Filtered(链式处理时多次追加,如 _Filtered_Processed)
+            self.resultsdata.append(real_filtered[i])
+            self.resultsdataname.append(orig_name[i] + self._processed_suffix)
+            self.resultsselectlist.append(orig_select[i] if i < len(orig_select) else 0)
+            proc_info = orig_info.copy()
+            proc_info['synthetic'] = True
+            proc_info['filter_applied'] = True
+            proc_info['filter_method'] = self.filterui.filtermethodComboBox.currentText()
+            self.resultsdataInfo.append(proc_info)
+
         return
 
     def create_filtered_datainfo(self):
-        """创建包含滤波信息的数据信息"""
-        filtered_datainfo = []
-        current_method = self.filterui.filtermethodComboBox.currentText()
-        
-        # 为每个输出数据集创建对应的信息
-        for i in range(len(self.resultsdataname)):
-            if 'Origin_' in self.resultsdataname[i]:
-                # 原始数据，使用原始信息
-                original_index = i // 2  # 每两个输出对应一个输入
-                if original_index < len(self.dataInfo):
-                    filtered_datainfo.append(self.dataInfo[original_index].copy())
-                else:
-                    filtered_datainfo.append({})
-            else:
-                # 滤波数据，添加滤波信息
-                original_index = i // 2
-                if original_index < len(self.dataInfo):
-                    info = self.dataInfo[original_index].copy()
-                else:
-                    info = {}
-                
-                # 添加滤波处理信息
-                info['filter_applied'] = True
-                info['filter_method'] = current_method
-                info['filter_parameters'] = self.get_current_filter_parameters()
-                info['processing_timestamp'] = self.get_current_timestamp()
-                
-                filtered_datainfo.append(info)
-        
-        return filtered_datainfo
+        """
+        返回最近一次 databasecreat 填入的 resultsdataInfo(替代原来的复杂生成逻辑)
+        长度 2N,奇数位 dataInfo 已包含 synthetic:True 标签
+        """
+        return self.resultsdataInfo
 
     def get_current_filter_parameters(self):
         """获取当前滤波器参数"""

@@ -46,11 +46,18 @@ _DEFAULT_REF_DIR = os.path.join(_PROJECT_ROOT, 'TestData', 'Processing', 'DataPr
 class Dataprocess(QWidget, DataprocessUI):
     Apdatasignal = Signal(list, list, list, list)
 
+    # 处理后数据名称后缀(链式处理时会追加,例如 Processing 后再 Fitting 会得到 _Processed_Fitted)
+    _processed_suffix = '_Processed'
+
     def __init__(self, parent=None):
         super(Dataprocess, self).__init__(parent)
         ########变量申明###############
         self.initdata()
         ########变量申明###############
+
+        # 兜底:如果 _processed_suffix 未生效,在这里再次设置
+        if not hasattr(self.__class__, '_processed_suffix') or not self.__class__._processed_suffix:
+            self.__class__._processed_suffix = '_Processed'
 
         ###########初始化###################
 
@@ -77,7 +84,13 @@ class Dataprocess(QWidget, DataprocessUI):
         self.prodataname = []          # 输入数据名称列表
         self.prodata = []              # 输入数据列表
         self.dataInfo = []             # 输入数据信息
-        
+
+        # Original data (N 条,不含合成副本,用于数据处理)
+        self.original_prodata = []           # 原始数据列表
+        self.original_prodataname = []       # 原始数据名称列表
+        self.original_selectlist = []         # 原始数据选择列表
+        self.original_dataInfo = []          # 原始数据信息
+
         # Processed/Output data
         self.resultsselectlist = []   # 输出数据选择列表
         self.resultsdata = []         # 输出数据列表
@@ -98,6 +111,9 @@ class Dataprocess(QWidget, DataprocessUI):
         self.prodata = inputdata.copy() if inputdata else []
         self.dataInfo = inputmessage.copy() if inputmessage else []
 
+        # 从 2N 配对数据中提取原始 N 条(用于实际处理)
+        self._extract_original_data()
+
         print('process get data',self.selectlist, self.prodataname, len(self.prodata), self.dataInfo)
         # print(self.prodata)
 
@@ -111,17 +127,56 @@ class Dataprocess(QWidget, DataprocessUI):
         # print(outputselectlist, outputdataname, len(outputdata))
         # print(self.outputdata)
 
+    def _extract_original_data(self):
+        """
+        从 self.prodata 中提取原始 N 条数据(不含合成副本)。
+        自适应:配对格式(2N + 奇数位带 synthetic 标签)取偶数索引,否则全部。
+        """
+        n_pro = len(self.prodata)
+        is_paired = (
+            n_pro > 0
+            and n_pro % 2 == 0
+            and self.dataInfo
+            and len(self.dataInfo) == n_pro
+            and any(isinstance(info, dict) and info.get('synthetic', False)
+                    for info in self.dataInfo[1::2])
+        )
+        if is_paired:
+            self.original_prodata = [self.prodata[i] for i in range(0, n_pro, 2)]
+            self.original_prodataname = [self.prodataname[i] for i in range(0, n_pro, 2)]
+            self.original_selectlist = [self.selectlist[i] for i in range(0, n_pro, 2)]
+            self.original_dataInfo = [self.dataInfo[i] for i in range(0, n_pro, 2)]
+        else:
+            self.original_prodata = list(self.prodata)
+            self.original_prodataname = list(self.prodataname)
+            self.original_selectlist = list(self.selectlist)
+            self.original_dataInfo = list(self.dataInfo) if self.dataInfo else [{}] * n_pro
+
     def auto_forward_data(self):
-        """自动转发数据到下一个模块"""
+        """自动转发数据到下一个模块(只转发原始 N 条,不含合成副本)"""
         if len(self.prodata) > 0:
             if self.processui.processCheckBox.isChecked():
                 # 如果启用了处理功能，等待用户手动处理
                 pass
                 print("Processing enabled - waiting for manual processing")
             else:
-                # 如果未启用处理功能，自动转发原始数据
-                self.sendsignal(self.selectlist.copy(), self.prodataname.copy(),
-                            self.prodata.copy(), self.dataInfo.copy())
+                # 如果未启用处理功能，自动转发原始数据(只 N 条)
+                if self.original_prodata and len(self.original_prodata) < len(self.prodata):
+                    # 配对格式:只转发原始 N 条,避免下游 4N
+                    self.sendsignal(
+                        self.original_selectlist.copy(),
+                        self.original_prodataname.copy(),
+                        self.original_prodata.copy(),
+                        self.original_dataInfo.copy()
+                    )
+                else:
+                    # 非配对格式:转发全部
+                    self.sendsignal(
+                        self.selectlist.copy(),
+                        self.prodataname.copy(),
+                        self.prodata.copy(),
+                        self.dataInfo.copy()
+                    )
                 print("Processing disabled - auto-forwarding original data")
 
     #################################信号###########################
@@ -377,52 +432,88 @@ class Dataprocess(QWidget, DataprocessUI):
 
 
     def databasecreat(self, processresults):
-        """创建输出数据库：将原始数据和处理结果组合"""
-                # 清空输出数据（但不清空输入数据和参考数据）
+        """
+        创建输出数据库:严格 2N 成对形式
+        - 偶数位(2i): 原始数据,无 synthetic 标签
+        - 奇数位(2i+1): 处理后数据,dataInfo 带 synthetic:True 标签
+        名字保持原样(链式处理时仅追加自身后缀)。
+
+        processresults 自适应处理:
+        - 配对格式(self.prodata 2N + 奇数位带 synthetic 标签):取前 N 作为"真实处理结果"
+        - 非配对格式:全部作为处理结果
+        """
+        n_pro = len(self.prodata)
+
+        # 配对格式检测:2N + dataInfo 奇数位带 synthetic 标签
+        is_paired = (
+            n_pro > 0
+            and n_pro % 2 == 0
+            and self.dataInfo
+            and len(self.dataInfo) == n_pro
+            and any(isinstance(info, dict) and info.get('synthetic', False)
+                    for info in self.dataInfo[1::2])
+        )
+
+        if is_paired:
+            n = n_pro // 2
+            orig_data = [self.prodata[i] for i in range(0, n_pro, 2)]
+            orig_name = [self.prodataname[i] for i in range(0, n_pro, 2)]
+            orig_select = [self.selectlist[i] for i in range(0, n_pro, 2)]
+            orig_info_list = [self.dataInfo[i] for i in range(0, n_pro, 2)]
+            if processresults and len(processresults) == n_pro:
+                real_filtered = processresults[:n]
+            else:
+                real_filtered = orig_data if (processresults is self.prodata) else (
+                    list(processresults) if processresults else orig_data
+                )
+        else:
+            n = n_pro
+            orig_data = list(self.prodata)
+            orig_name = list(self.prodataname)
+            orig_select = list(self.selectlist)
+            orig_info_list = list(self.dataInfo) if self.dataInfo else [{}] * n
+            real_filtered = list(processresults) if processresults else list(self.prodata)
+
+        if not real_filtered or len(real_filtered) != n:
+            print(f'Error: Process results length ({len(real_filtered) if real_filtered else 0}) '
+                  f'does not match expected length ({n})')
+            return
+
+        # 清空输出
         self.resultsdata = []
         self.resultsdataname = []
         self.resultsselectlist = []
-        
-        # 组合原始数据和处理结果
-        for i in range(0, len(self.prodata)):
-            # 添加原始数据
-            self.resultsdata.append(self.prodata[i])
-            self.resultsdataname.append('Origin_' + self.prodataname[i])
-            self.resultsselectlist.append(self.selectlist[i])
-            
-            # 添加处理后的数据
-            self.resultsdata.append(processresults[i])
-            self.resultsdataname.append('Processed_' + self.prodataname[i])
-            self.resultsselectlist.append(self.selectlist[i])
-        
+        self.resultsdataInfo = []
+
+        current_method = self.processui.processmethodComboBox.currentText()
+
+        for i in range(n):
+            # 偶数位: 原始数据
+            self.resultsdata.append(orig_data[i])
+            self.resultsdataname.append(orig_name[i])
+            self.resultsselectlist.append(orig_select[i] if i < len(orig_select) else 0)
+            orig_info = orig_info_list[i].copy() if isinstance(orig_info_list[i], dict) else {}
+            orig_info.pop('synthetic', None)
+            self.resultsdataInfo.append(orig_info)
+
+            # 奇数位: 处理后数据
+            self.resultsdata.append(real_filtered[i])
+            self.resultsdataname.append(orig_name[i] + self._processed_suffix)
+            self.resultsselectlist.append(orig_select[i] if i < len(orig_select) else 0)
+            proc_info = orig_info.copy()
+            proc_info['synthetic'] = True
+            proc_info['process_applied'] = True
+            proc_info['process_method'] = current_method
+            self.resultsdataInfo.append(proc_info)
+
         print(f'Database created: {len(self.resultsdata)} datasets (original + processed)')
         return
 
 
 
     def create_processed_datainfo(self):
-        """创建包含处理信息的数据信息"""
-        processed_datainfo = []
-        current_method = self.processui.processmethodComboBox.currentText()
-        
-        # 为每个输出数据集创建对应的信息
-        for i in range(len(self.resultsdataname)):
-            if 'Origin_' in self.resultsdataname[i]:
-                # 原始数据，使用原始信息
-                original_index = i // 2  # 每两个输出对应一个输入
-                if original_index < len(self.dataInfo):
-                    processed_datainfo.append(self.dataInfo[original_index].copy())
-                else:
-                    processed_datainfo.append({})
-            else:
-                # 处理数据，添加处理信息
-                original_index = i // 2
-                if original_index < len(self.dataInfo):
-                    info = self.dataInfo[original_index].copy()
-                else:
-                    info = {}
-                       
-        return processed_datainfo
+        """返回 resultsdataInfo(由 databasecreat 填入)"""
+        return list(self.resultsdataInfo)
 
 
     def ClearrefFiles(self, ComboBoxNum):  ##清除输入的参考数据
