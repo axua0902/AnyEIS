@@ -34,6 +34,9 @@ class Ui_PlottingPage(object):
         self.inputWg = inputWidget()#左侧数据输入区
         self.figureWg= FigWidget()#右侧绘图区
 
+        # Plotting 页面(纯 Input 模式)不区分原始/处理数据,关闭这两个无意义复选框
+        self.figureWg.set_processing_state_enabled(False)
+
 
 
         # 左侧区域 - inputWg 内容

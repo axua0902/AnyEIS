@@ -32,6 +32,9 @@ class Ui_SimulationPage(object):
         self.simWg = Simu()# 仿真组件
         self.figureWg = FigWidget()# 绘图组件
 
+        # Simulation 页面(纯仿真模式)不区分原始/处理数据,关闭这两个无意义复选框
+        self.figureWg.set_processing_state_enabled(False)
+
         # 左侧区域 - 仿真和参考数据
         self.left_widget = QWidget(self.Simulation)
         self.left_widget.setObjectName("LeftWidget")

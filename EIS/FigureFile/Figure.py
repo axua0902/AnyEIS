@@ -72,6 +72,20 @@ class FigWidget(QWidget ,FigureUI):
         # Plotting 页面(纯 Input)会调用 set_processing_state_enabled(False) 关闭它们
         self._processing_state_enabled = True
 
+    def set_processing_state_enabled(self, enabled):
+        """
+        控制 Original / Processed 复选框的可用性。
+        Input/Simulation 模式下传入 False,关闭这两个无意义的复选框;
+        Processing/Fitting 模式下保持 True(默认)。
+        """
+        self._processing_state_enabled = enabled
+        self.figuregui.origindataCheckBox.setEnabled(enabled)
+        self.figuregui.processeddataCheckBox.setEnabled(enabled)
+        # 禁用时同时取消勾选,避免残留状态影响后续保存逻辑
+        if not enabled:
+            self.figuregui.origindataCheckBox.setChecked(False)
+            self.figuregui.processeddataCheckBox.setChecked(False)
+
 
 
 
@@ -439,6 +453,13 @@ class FigWidget(QWidget ,FigureUI):
     def selectsavedata(self, savelist):
         inputdata = list()
         inputdataname = list()
+        # 防御性检查:Input/Simulation 模式(复选框被禁用)直接返回全部数据
+        if not getattr(self, '_processing_state_enabled', True):
+            for i in range(0, len(self.plotdata)):
+                if savelist[i] == 1:
+                    inputdata.append(self.plotdata[i])
+                    inputdataname.append(self.plotdataname[i])
+            return inputdata, inputdataname, savelist
         if self.figuregui.origindataCheckBox.isChecked() == 0 and self.figuregui.processeddataCheckBox.isChecked() == 1:
             for i in range(0, len(savelist)):
                 if i % 2 == 0:  ###偶数

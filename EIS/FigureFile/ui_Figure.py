@@ -160,7 +160,7 @@ class FigureUI():
             border_width=2,
             border_radius=3
         )
-        self.origindataCheckBox.setChecked(False)
+        self.processeddataCheckBox.setChecked(False)
         self.dataProcessingStateLayout.addWidget(self.processeddataCheckBox)
         self.dataProcessingStateLayout.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
