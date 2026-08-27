@@ -17,6 +17,21 @@ class Settings(object):
     if not os.path.isfile(settings_path):
         print(f"WARNING: \"settings.json\" not found! check in the folder {settings_path}")
 
+    @staticmethod
+    def _resolve_path(path):
+        """
+        把路径解析为绝对路径:
+        - 如果是绝对路径,直接返回
+        - 如果是相对路径,相对于项目根目录(<project_root> = base_settings.json 所在目录)
+        """
+        if not path:
+            return path
+        if os.path.isabs(path):
+            return os.path.normpath(path)
+        # 相对路径:相对于 base_settings.json 所在目录
+        base_dir = os.path.dirname(os.path.abspath(Settings.settings_path))
+        return os.path.normpath(os.path.join(base_dir, path))
+
     # INIT SETTINGS
     # ///////////////////////////////////////////////////////////////
     def __init__(self):
@@ -60,7 +75,7 @@ class Settings(object):
     # GET WORKING PATH
     # ///////////////////////////////////////////////////////////////
     def get_working_path(self):
-        return self.items.get("working_path")
+        return Settings._resolve_path(self.items.get("working_path"))
 
     # CHANGE WORKING PATH
     # ///////////////////////////////////////////////////////////////
@@ -72,6 +87,22 @@ class Settings(object):
     # ///////////////////////////////////////////////////////////////
     def get_top_settings(self):
         return self.items.get("top_settings", {})
+
+    # GET NESTED PATH(自动解析相对路径为绝对路径)
+    # ///////////////////////////////////////////////////////////////
+    def get_path(self, *keys, default=None):
+        """
+        按层级 key 获取 top_settings 下的路径字段,并自动解析为绝对路径。
+        用法: settings.get_path('paths', 'results_data', default='Results')
+        """
+        value = self.items
+        for k in keys:
+            if not isinstance(value, dict) or k not in value:
+                return default
+            value = value[k]
+        if not isinstance(value, str):
+            return value
+        return Settings._resolve_path(value)
 
     # UPDATE PENDING DATA PATH
     # ///////////////////////////////////////////////////////////////

@@ -79,10 +79,19 @@ class inputWidget(QWidget):
         ################清除旧数据###################
 
     def GetInputFiles(self):  ##inputdataButton输入新数据文件
-        # 使用Settings中的working_path获取Data文件夹路径
-        settings = Settings()
-        working_path = settings.get_working_path()
-        data_folder = os.path.join(working_path, 'Data')
+        # 默认打开项目根目录下的 Data 文件夹
+        # 不再依赖 base_settings.json 中的 working_path(避免绝对路径耦合)
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        data_folder = os.path.join(project_root, 'Data')
+
+        # 如果 Data 文件夹不存在,自动创建(可选,提升用户体验)
+        if not os.path.exists(data_folder):
+            try:
+                os.makedirs(data_folder, exist_ok=True)
+                print(f'Created data folder: {data_folder}')
+            except Exception as e:
+                print(f'Failed to create data folder {data_folder}: {e}')
+                data_folder = project_root  # 回退到项目根目录
 
         filesname, filetype = QFileDialog.getOpenFileNames(self, 'Open File', data_folder,
                                                            "Data Files (*.xlsx *.xls *.csv);;Text Files (*.txt);;All Files (*)")

@@ -149,20 +149,25 @@ class Datafilter(QWidget, DatafilterUI):
         print('FIlter emit data',outputselectlist, outputdataname, len(outputdata),outputmessage)
 
     def auto_forward_data(self):
-        """自动转发数据到下一个模块"""
+        """
+        自动转发数据到下一个模块。
+        - 如果未启用处理功能,把当前 prodata 原样转发(可能是 Input 来的 2N,也可能是 1N)
+        - 这样上游的数据(原始或处理)都能直接到达下游,不被截断
+        """
         if len(self.prodata) > 0:
             if self.filterui.filterCheckBox.isChecked():
                 # 如果启用了处理功能，等待用户手动处理
                 print("Processing enabled - waiting for manual processing")
             else:
-                # 如果未启用处理功能,自动转发原始数据(N 条,不含合成副本)
-                print("Processing disabled - auto-forwarding original data")
+                # 关键修复:原样透传上游数据(N 条或 2N 都行,不强制截断)
                 self.sendsignal(
-                    list(self.original_selectlist),
-                    list(self.original_prodataname),
-                    list(self.original_prodata),
-                    list(self.original_dataInfo)
+                    self.selectlist.copy(),
+                    self.prodataname.copy(),
+                    self.prodata.copy(),
+                    self.dataInfo.copy()
                 )
+                print(f'[auto_forward_data] Filter disabled, forwarding '
+                      f'{len(self.prodata)} 条数据(原样透传)')
 
 
     ##################################数据检查#############################

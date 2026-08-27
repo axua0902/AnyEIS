@@ -20,6 +20,66 @@ from EIS.FigureFile.UserDefineFun import userdefine1, userdefine2, userdefine3, 
 from setting import Settings
 
 
+def _ensure_writable_dir(dir_path):
+    """
+    确保目录存在且可写,失败时返回 False。
+    - 目录不存在则尝试创建
+    - 存在但不可写则返回 False
+    """
+    if not dir_path:
+        return False
+    if not os.path.exists(dir_path):
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            print(f'Created results directory: {dir_path}')
+        except Exception as e:
+            print(f'Failed to create directory {dir_path}: {e}')
+            return False
+    if not os.path.isdir(dir_path):
+        return False
+    # 尝试创建临时文件,验证可写
+    try:
+        test_file = os.path.join(dir_path, '.write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        return True
+    except Exception as e:
+        print(f'Directory not writable: {dir_path} ({e})')
+        return False
+
+
+def _resolve_excel_dir():
+    """
+    解析 Excel 文件所在目录。
+    1. 优先用项目根目录下的 Results(默认/推荐)
+    2. 若该目录不可用,回退到 base_settings.json 中 top_settings.paths.results_data + working_path
+    3. 都不可用则返回 None
+    """
+    # 1. 默认优先:项目根目录下的 Results
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    default_dir = os.path.join(project_root, 'Results')
+    if _ensure_writable_dir(default_dir):
+        return default_dir
+
+    # 2. 回退:base_settings.json 中配置的 results_data(自动解析相对/绝对路径)
+    try:
+        settings = Settings()
+        fallback = settings.get_path('top_settings', 'paths', 'results_data',
+                                     default='Results')
+    except Exception as e:
+        print(f'Failed to load settings: {e}')
+        fallback = None
+
+    print(f'Default results dir not writable: {default_dir}\nFalling back to: {fallback}')
+
+    if fallback and _ensure_writable_dir(fallback):
+        return fallback
+
+    # 都不行:返回默认目录(由调用方处理)
+    return default_dir if default_dir else fallback
+
+
 
 
 
@@ -453,13 +513,35 @@ class FigWidget(QWidget ,FigureUI):
 
     def saveasexcel(self):
         savelist = self.outputlist.copy()
-        inputdata, inputdataname, savelist = self.selectsavedata(savelist)
+        print(f'[saveasexcel] _processing_state_enabled={getattr(self, "_processing_state_enabled", True)}, '
+              f'outputlist长度={len(self.outputlist)}, plotdata长度={len(self.plotdata)}')
+
+        # Input/Simulation 模式:复选框被禁用,plotdata 是 2N(原始+合成副本,同引用)
+        # 跳过 selectsavedata 的奇偶筛选,只取偶数索引(原始)避免重复保存
+        if not getattr(self, '_processing_state_enabled', True):
+            inputdata = []
+            inputdataname = []
+            savelist_new = []
+            for i in range(0, len(self.plotdata), 2):
+                # 选中状态只看偶数位;奇数位的合成副本自动跳过
+                selected = (i < len(savelist) and savelist[i] == 1)
+                if selected:
+                    inputdata.append(self.plotdata[i])
+                    inputdataname.append(self.plotdataname[i])
+                savelist_new.append(1 if selected else 0)
+            # savelist 补齐到 2N 长度,供下游使用
+            savelist = savelist_new + [0] * (len(self.plotdata) - len(savelist_new))
+            print(f'[saveasexcel] Input/Simulation模式:保存 {len(inputdata)} 条数据')
+        else:
+            inputdata, inputdataname, savelist = self.selectsavedata(savelist)
+            print(f'[saveasexcel] Filter/Processing/Fitting模式:保存 {len(inputdata)} 条数据')
 
         excelname = self.figuregui.excelnameTextEdit.text()
-        settings = Settings()
-        working_path = settings.get_working_path()
-        results_data = settings.items.get("top_settings", {}).get("paths", {}).get("results_data", "Results")
-        wbname = os.path.join(working_path, results_data, excelname + '.xlsx')
+        results_dir = _resolve_excel_dir()
+        if not results_dir or not os.path.isdir(results_dir):
+            print(f'Results directory not available: {results_dir}')
+            return
+        wbname = os.path.join(results_dir, excelname + '.xlsx')
 
         if self.figuregui.datatypeComboBox.currentText() == 'f-Z,Phase,Re(Z),Im(Z)':
             #############创建excel文件,定义文件名,数据名,列名
@@ -515,8 +597,15 @@ class FigWidget(QWidget ,FigureUI):
                 if savelist[i] == 1:
                     inputdata.append(self.plotdata[i])
                     inputdataname.append(self.plotdataname[i])
+            print(f'[selectsavedata] Input/Simulation模式:返回 {len(inputdata)} 条')
             return inputdata, inputdataname, savelist
-        if self.figuregui.origindataCheckBox.isChecked() == 0 and self.figuregui.processeddataCheckBox.isChecked() == 1:
+
+        orig_state = self.figuregui.origindataCheckBox.isChecked()
+        proc_state = self.figuregui.processeddataCheckBox.isChecked()
+        print(f'[selectsavedata] 复选框状态 Original={orig_state}, Processed={proc_state}, '
+              f'plotdata长度={len(self.plotdata)}')
+
+        if orig_state == 0 and proc_state == 1:
             for i in range(0, len(savelist)):
                 if i % 2 == 0:  ###偶数
                     savelist[i] = 0
@@ -556,25 +645,31 @@ class FigWidget(QWidget ,FigureUI):
             print('No excel file name specified')
             QMessageBox.warning(self, "Warning", "No excel file name specified")
             return
-        
+
         # 清理文件名，移除可能的无效字符
         excel_filename = excel_filename.replace(',', '').replace(' ', '_')
-        
+
         # 确保扩展名正确
         if not excel_filename.endswith('.xlsx'):
             if excel_filename.endswith('.xls') or excel_filename.endswith('.xsx'):
                 excel_filename = excel_filename.rsplit('.', 1)[0] + '.xlsx'
             else:
                 excel_filename = excel_filename + '.xlsx'
-        
-        excel_path = os.path.join('Results', excel_filename)
-        
-        # 检查Results目录是否存在
-        if not os.path.exists('Results'):
-            print('Results directory not found')
-            QMessageBox.warning(self, "Warning", "Results directory not found.\nPlease export data to Excel first to create the directory.")
+
+        # 与 saveasexcel 使用相同的路径解析策略:
+        # 1. 优先 base_settings.json 中 top_settings.paths.results_data
+        # 2. 回退到项目根目录下的 Results
+        results_dir = _resolve_excel_dir()
+        if not results_dir or not os.path.isdir(results_dir):
+            print(f'Results directory not found: {results_dir}')
+            QMessageBox.warning(
+                self, "Warning",
+                f"Results directory not found.\n{results_dir}\n"
+                "Please export data to Excel first to create the directory.")
             return
-        
+
+        excel_path = os.path.join(results_dir, excel_filename)
+
         # 检查文件是否存在
         if os.path.exists(excel_path):
             try:

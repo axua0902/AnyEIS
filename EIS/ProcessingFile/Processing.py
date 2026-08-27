@@ -153,30 +153,28 @@ class Dataprocess(QWidget, DataprocessUI):
             self.original_dataInfo = list(self.dataInfo) if self.dataInfo else [{}] * n_pro
 
     def auto_forward_data(self):
-        """自动转发数据到下一个模块(只转发原始 N 条,不含合成副本)"""
+        """
+        自动转发数据到下一个模块。
+        - 如果未启用处理功能,把当前 prodata(可能是上游 Filter 发来的 2N 处理结果)原样转发
+        - 这样 Filter 的 2N 处理结果能直接到达 Figure,不被截断
+        """
         if len(self.prodata) > 0:
             if self.processui.processCheckBox.isChecked():
-                # 如果启用了处理功能，等待用户手动处理
+                # 如果启用了处理功能,等待用户手动处理
                 pass
                 print("Processing enabled - waiting for manual processing")
             else:
-                # 如果未启用处理功能，自动转发原始数据(只 N 条)
-                if self.original_prodata and len(self.original_prodata) < len(self.prodata):
-                    # 配对格式:只转发原始 N 条,避免下游 4N
-                    self.sendsignal(
-                        self.original_selectlist.copy(),
-                        self.original_prodataname.copy(),
-                        self.original_prodata.copy(),
-                        self.original_dataInfo.copy()
-                    )
-                else:
-                    # 非配对格式:转发全部
-                    self.sendsignal(
-                        self.selectlist.copy(),
-                        self.prodataname.copy(),
-                        self.prodata.copy(),
-                        self.dataInfo.copy()
-                    )
+                # 关键修复:上游 Filter 可能已发出 2N 处理结果,需要原样转发而非截断
+                # 如果 self.prodata 是 2N 配对(来自 Filter 的真实处理结果),整体转发
+                # 如果是 N 条(来自 Input 的原始),也整体转发
+                self.sendsignal(
+                    self.selectlist.copy(),
+                    self.prodataname.copy(),
+                    self.prodata.copy(),
+                    self.dataInfo.copy()
+                )
+                print(f'[auto_forward_data] Processing disabled, forwarding '
+                      f'{len(self.prodata)} 条数据(原样透传)')
                 print("Processing disabled - auto-forwarding original data")
 
     #################################信号###########################
