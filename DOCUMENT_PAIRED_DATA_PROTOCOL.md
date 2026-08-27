@@ -575,4 +575,324 @@ is_paired = (
 
 ---
 
-**文档结束**。所有改动已经测试通过，5 个模块的数据流现在完全统一。
+## 十、auto_forward_data 透传修复（数据流链路问题）
+
+### 问题
+
+数据流链路 `Input → Filter → Processing → Figure` 中，**Filter 处理后只发出 2N 配对数据，但 Processing 在未启用时把上游 2N 截断为 N 条原始**再转发，导致 Figure 收不到 2N 处理结果。
+
+**典型日志**:
+```
+FIlter emit data [1, 1] ['filter', 'filter_Filtered'] 2  ← Filter 发出 2N
+process get data [1] ['filter'] 1 [{}]                    ← Processing 收到 1N
+process emit data [1] ['filter'] 1 [{}]                   ← Processing 转发 1N
+obtained by Figure [1] ['filter'] 1 [{}]                  ← Figure 只收到 1N
+```
+
+### 根本原因
+
+`auto_forward_data` 的旧逻辑**强制截断**为 N 条原始数据：
+```python
+# 旧代码(Filter 和 Processing 都是)
+if self.processui.processCheckBox.isChecked():
+    pass  # 启用 → 等用户手动处理
+else:
+    # 禁用 → 转发 original_* (N 条),把上游 2N 截断了
+    self.sendsignal(self.original_selectlist, ...)
+```
+
+### 修复方案
+
+**`auto_forward_data` 改为"原样透传"上游数据**（不再截断）：
+
+**文件**: `EIS/FilterFile/Filter.py:151-170`
+```python
+def auto_forward_data(self):
+    """原样透传上游数据(N 条或 2N 都行,不强制截断)"""
+    if len(self.prodata) > 0:
+        if self.filterui.filterCheckBox.isChecked():
+            print("Processing enabled - waiting for manual processing")
+        else:
+            self.sendsignal(
+                self.selectlist.copy(),
+                self.prodataname.copy(),
+                self.prodata.copy(),
+                self.dataInfo.copy()
+            )
+```
+
+**文件**: `EIS/ProcessingFile/Processing.py:155-179` — 同上模式
+
+### 修复后行为
+
+| 场景 | Filter 发出 | Processing 收到 | Processing 转发 | Figure 收到 |
+|------|------------|----------------|----------------|------------|
+| 仅启用 Filter | 2N（原+滤波）| 2N | 2N（原样透传）| 2N ✓ |
+| 仅启用 Processing | 2N（透传）| 2N | 2N（原+处理）| 2N ✓ |
+| Filter+Processing 都启用 | 2N（滤波）| 2N | 4N（原+处理）| 4N ✓ |
+| 都未启用 | 2N（Input 原样）| 2N | 2N（透传）| 2N ✓ |
+
+---
+
+## 十一、Figure 模块路径解析与 Excel 保存
+
+### 问题 1：FileNotFoundError 保存 Excel 失败
+
+**错误**:
+```
+FileNotFoundError: [Errno 2] No such file or directory:
+'E:/Research/AnyEIS/AnyEIS4_test/results_data\\data_260827100535.xlsx'
+```
+
+**根因**: `saveasexcel` 直接用 `xlsxwriter` 创建文件，但**没有先创建结果目录**。
+
+### 修复 1：自动创建结果目录
+
+**文件**: `EIS/FigureFile/Figure.py:23-49`
+
+新增工具函数：
+```python
+def _ensure_writable_dir(dir_path):
+    """确保目录存在且可写,失败时返回 False"""
+    if not dir_path:
+        return False
+    if not os.path.exists(dir_path):
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+        except Exception as e:
+            print(f'Failed to create directory {dir_path}: {e}')
+            return False
+    # 验证可写
+    try:
+        test_file = os.path.join(dir_path, '.write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+```
+
+### 问题 2：Input/Simulation 模式下 Excel 保存重复
+
+**根因**: `selectsavedata` 按 `i%2` 奇偶索引筛选，Input 数据两条同引用，导致保存 2 次相同内容。
+
+### 修复 2：saveasexcel 区分模式
+
+**文件**: `EIS/FigureFile/Figure.py:510-540`
+
+```python
+def saveasexcel(self):
+    savelist = self.outputlist.copy()
+    if not getattr(self, '_processing_state_enabled', True):
+        # Input/Simulation 模式:只取偶数索引(原始),避免重复保存
+        inputdata = []
+        inputdataname = []
+        savelist_new = []
+        for i in range(0, len(self.plotdata), 2):
+            selected = (i < len(savelist) and savelist[i] == 1)
+            if selected:
+                inputdata.append(self.plotdata[i])
+                inputdataname.append(self.plotdataname[i])
+            savelist_new.append(1 if selected else 0)
+        savelist = savelist_new + [0] * (len(self.plotdata) - len(savelist_new))
+    else:
+        # Filter/Processing/Fitting 模式:走 selectsavedata(按复选框筛选)
+        inputdata, inputdataname, savelist = self.selectsavedata(savelist)
+    ...
+```
+
+### 问题 3：路径硬编码
+
+**根因**: 路径中 `E:/Research/AnyEIS/AnyEIS4_test/results_data` 是绝对路径,跨设备/跨用户无法复用。
+
+### 修复 3：相对路径 + 项目根目录回退
+
+**文件**: `base_settings.json:33-35`
+```json
+"paths": {
+    "pending_data": "Results",
+    "reference_data": "TestData/Processing/DataProcess",
+    "results_data": "Results"
+}
+```
+
+**文件**: `setting.py` 新增路径解析:
+```python
+@staticmethod
+def _resolve_path(path):
+    """绝对路径原样返回,相对路径基于 base_settings.json 所在目录解析"""
+    if not path:
+        return path
+    if os.path.isabs(path):
+        return os.path.normpath(path)
+    base_dir = os.path.dirname(os.path.abspath(Settings.settings_path))
+    return os.path.normpath(os.path.join(base_dir, path))
+
+def get_working_path(self):
+    return Settings._resolve_path(self.items.get("working_path"))
+
+def get_path(self, *keys, default=None):
+    """按层级 key 获取路径字段,自动解析为绝对路径"""
+    value = self.items
+    for k in keys:
+        if not isinstance(value, dict) or k not in value:
+            return default
+        value = value[k]
+    if not isinstance(value, str):
+        return value
+    return Settings._resolve_path(value)
+```
+
+**文件**: `EIS/FigureFile/Figure.py:52-84` 新增统一路径解析:
+```python
+def _resolve_excel_dir():
+    """
+    1. 优先项目根目录下的 Results
+    2. 回退到 base_settings.json 中 top_settings.paths.results_data
+    """
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    default_dir = os.path.join(project_root, 'Results')
+    if _ensure_writable_dir(default_dir):
+        return default_dir
+
+    try:
+        settings = Settings()
+        fallback = settings.get_path('top_settings', 'paths', 'results_data',
+                                     default='Results')
+    except Exception:
+        fallback = None
+
+    if fallback and _ensure_writable_dir(fallback):
+        return fallback
+    return default_dir
+```
+
+### 路径解析优先级
+
+| 优先级 | 目录 | 说明 |
+|--------|------|------|
+| 1 | `<项目根>/Results` | 默认/推荐(项目内) |
+| 2 | `base_settings.json` 配置的 `results_data` | 回退(兼容性) |
+
+`saveasexcel` 和 `OpenExcelFiles` 都使用 `_resolve_excel_dir()`,保持路径一致。
+
+---
+
+## 十二、Input 模块路径优化
+
+### 问题
+
+`GetInputFiles` 之前使用 `Settings().get_working_path() + 'Data'`,依赖 `working_path` 配置。
+
+### 修复
+
+**文件**: `EIS/InputFile/Input.py:81-95`
+
+```python
+def GetInputFiles(self):
+    # 默认打开项目根目录下的 Data 文件夹(不依赖 working_path)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    data_folder = os.path.join(project_root, 'Data')
+
+    # 自动创建(若不存在)
+    if not os.path.exists(data_folder):
+        try:
+            os.makedirs(data_folder, exist_ok=True)
+        except Exception:
+            data_folder = project_root  # 回退
+
+    filesname, filetype = QFileDialog.getOpenFileNames(...)
+```
+
+**关键点**:
+- 不依赖 `working_path`(解耦项目位置)
+- 自动创建 `Data` 文件夹(首次使用)
+- 创建失败时回退到项目根
+
+---
+
+## 十三、问题 11：auto_forward_data 截断上游数据
+
+**时间**: 2026-08-27
+
+**现象**: Filter 处理后图窗只显示 1 条曲线,Excel 只保存 1 个 sheet
+
+**根因**: `auto_forward_data` 在模块未启用时,把上游 2N 数据强制截断为 N 条原始数据转发,导致下游 Figure 收不到处理结果
+
+**修复**:
+- [Filter.py:151-170](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FilterFile/Filter.py#L151-L170) `auto_forward_data` 改为原样透传
+- [Processing.py:155-179](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processing.py#L155-L179) `auto_forward_data` 改为原样透传
+
+**关键设计**:
+- "我未处理" ≠ "我只转发原始 N 条"
+- 应该是"我未处理 → 上游什么数据我原样转发"
+- 让上游模块的输出直接到达 Figure,不被中间模块截断
+
+---
+
+## 十四、问题 12：Excel 路径 FileNotFoundError
+
+**时间**: 2026-08-27
+
+**现象**: `FileNotFoundError: 'E:/Research/AnyEIS/AnyEIS4_test/results_data\\data_xxx.xlsx'`
+
+**根因**: `saveasexcel` 没有先创建 `results_data` 目录
+
+**修复**: [Figure.py:23-49](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Figure.py#L23-L49) 新增 `_ensure_writable_dir` 工具函数,自动创建目录
+
+---
+
+## 十五、问题 13：Input/Simulation 模式下 Excel 重复保存
+
+**时间**: 2026-08-27
+
+**现象**: Plotting 加载 1 个文件保存,Excel 中有 2 个相同数据 sheet
+
+**根因**: `selectsavedata` 按 `i%2` 筛选,Input 数据两条同引用
+
+**修复**: [Figure.py:510-540](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Figure.py#L510-L540) `saveasexcel` 区分模式,Input/Simulation 只取偶数索引
+
+---
+
+## 十六、问题 14：路径硬编码无法跨设备复用
+
+**时间**: 2026-08-27
+
+**现象**: `base_settings.json` 中 `E:/Research/AnyEIS/AnyEIS4_test/...` 路径在其他电脑上无法使用
+
+**修复**:
+1. [base_settings.json:33-35](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/base_settings.json#L33-L35) 改为相对路径 `Results` / `TestData/Processing/DataProcess`
+2. [setting.py:18-32](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/setting.py#L18-L32) 新增 `_resolve_path` 静态方法
+3. [setting.py:76-77](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/setting.py#L76-L77) `get_working_path` 自动解析
+4. [setting.py:90-105](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/setting.py#L90-L105) 新增 `get_path(*keys)` 工具方法
+5. [Figure.py:52-84](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Figure.py#L52-L84) 新增 `_resolve_excel_dir` 统一解析
+6. [Input.py:81-95](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/InputFile/Input.py#L81-L95) `GetInputFiles` 默认项目根 `Data` 文件夹
+
+**关键设计**:
+- 相对路径基于 `base_settings.json` 所在目录(项目根)
+- 绝对路径原样返回(向后兼容)
+- 跨设备复制项目即可运行,无需修改配置
+
+---
+
+## 十七、最终文件改动清单（总计 12 个文件）
+
+| # | 文件 | 改动内容 |
+|---|------|----------|
+| 1 | `EIS/Other/Datacheck.py` | 新增 `ensure_paired_form` 函数 |
+| 2 | `EIS/FigureFile/Figure.py` | + `set_processing_state_enabled` + `set_display_synthetic` + `_on_processing_state_changed` + 重写 `_filter_synthetic_for_display` + `_ensure_writable_dir` + `_resolve_excel_dir` + `saveasexcel` 区分模式 + 路径解析 |
+| 3 | `EIS/FigureFile/ui_Figure.py` | 2 行 `setChecked(True)` + 1 行 bug 修复 |
+| 4 | `EIS/InputFile/Input.py` | 添加导入 + `sendsignal` 调用 `ensure_paired_form` + `onCellChanged` 同步更新 + `GetInputFiles` 改项目根 `Data` |
+| 5 | `GUI/pages/ui_page_plotting.py` | 1 行调用 `set_processing_state_enabled(False)` |
+| 6 | `GUI/pages/ui_page_simulation.py` | 1 行调用 `set_processing_state_enabled(False)` |
+| 7 | `EIS/FilterFile/Filter.py` | 类常量 + 5 个新属性 + `_extract_original_data` + `auto_forward_data` 改原样透传 + `databasecreat` 重写 + `create_filtered_datainfo` 简化 |
+| 8 | `EIS/ProcessingFile/Processing.py` | 同 Filter 模式 + 修复 `create_processed_datainfo` 实际未 append 的 BUG + `__init__` 兜底 + `auto_forward_data` 改原样透传 |
+| 9 | `EIS/FittingFile/Fitting.py` | 类常量 + `__init__` 兜底 + 5 个新属性 + `getsignal` 改 4 参数 + `_extract_original_data` + `ECMcalculation` 重写 + `MTcalculation` 重写 + `sendsignal` 第 4 参数改 `resultsdataInfo` |
+| 10 | `EIS/FittingFile/FittingSetRes.py` | `getsingal` 添加 MT 数据格式分支 |
+| 11 | `base_settings.json` | 绝对路径 → 相对路径 |
+| 12 | `setting.py` | 新增 `_resolve_path` + `get_path` 工具方法 |
+
+---
+
+**文档结束**。所有改动已经测试通过,5 个模块的数据流现在完全统一,12 个文件的修改覆盖数据流协议、UI 交互、路径解析、Excel 保存等全链路。
