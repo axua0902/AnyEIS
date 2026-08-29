@@ -429,7 +429,7 @@ class FigWidget(QWidget ,FigureUI):
             if canvas is not None:
                 canvas.fig.clear()
             
-            if data_type == 'f-Z,Phy,Rs,X':
+            if data_type == 'f-Z,Phase,Re(Z),Im(Z)':
                 # 阻抗数据绘图
                 if plot_type == 'Nyquist':
                     target_canvas.plotNyquist(self.outputlist, self.plotdataname, self.plotdata, figpos)

@@ -119,8 +119,14 @@ class inputWidget(QWidget):
 
     def deleteFiles(self):  ##删除导入的文件
         if self.inputui.inputdataComboBox.currentIndex() == -1:
-            self.cleartable()
+            self.cleardata()
             self.filesnamelist = list()
+            self._disconnect_cell_changed()
+            self.inputui.tableWidget.clearContents()
+            # 保留空表格结构(至少 10 行),避免表格被完全删除
+            while self.inputui.tableWidget.rowCount() < 10:
+                self.inputui.tableWidget.insertRow(self.inputui.tableWidget.rowCount())
+            self._connect_cell_changed()
             print('DeleteFiles No input data')
             return
         else:
@@ -129,8 +135,14 @@ class inputWidget(QWidget):
             self.filesnamelist.pop(index)                     ########删除文件列表中文件
             if len(self.filesnamelist) > 0:                   ##文件列表不为空时
                 self.selectfiles()                            ##########选择文件
-            else:                                             ###文件列表为空，删除表格
-                self.cleartable()
+            else:                                             ###文件列表为空,清空数据但保留空表格
+                self.cleardata()
+                self._disconnect_cell_changed()
+                self.inputui.tableWidget.clearContents()
+                # 保留空表格结构(至少 10 行)
+                while self.inputui.tableWidget.rowCount() < 10:
+                    self.inputui.tableWidget.insertRow(self.inputui.tableWidget.rowCount())
+                self._connect_cell_changed()
 
 
     def selectfiles(self):
@@ -295,7 +307,12 @@ class inputWidget(QWidget):
         self.inputui.selectallBtn.setChecked(True)
         #########清空输入的文件###############
 
-        self.cleartable()           # 清空表格
+        # 清空数据但保留空表格结构(至少 10 行)
+        self._disconnect_cell_changed()
+        self.inputui.tableWidget.clearContents()
+        while self.inputui.tableWidget.rowCount() < 10:
+            self.inputui.tableWidget.insertRow(self.inputui.tableWidget.rowCount())
+        self._connect_cell_changed()
 
         ########清空变量###############
         self.plotdata = list()      # 所有数据
