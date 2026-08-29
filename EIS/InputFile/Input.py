@@ -163,13 +163,14 @@ class inputWidget(QWidget):
                 return
             else:
                 self.selectedfileslist = []
-                # 检查所有索引是否有效，而不只是最后一个
-                if any(index >= len(self.filesnamelist) for index in self.nondash):
+                # 检查所有索引是否有效(1-based,与 combo box 显示一致)
+                if any(index < 1 or index > len(self.filesnamelist) for index in self.nondash):
                     print('Please check selection')  ###输出到状态栏
                     self.inputui.allCheckBox.setChecked(True)  # 回退到全选
                     return
                 else:
-                    self.selectedfileslist = [self.filesnamelist[temp] for temp in self.nondash]
+                    # 1-based 输入转为 0-based 访问 filesnamelist
+                    self.selectedfileslist = [self.filesnamelist[temp - 1] for temp in self.nondash]
         else:  #########无选择
             print('Please select one')  ###输出到状态栏
             return
@@ -303,8 +304,11 @@ class inputWidget(QWidget):
         self.inputui.inputdataComboBox.clear()
         self.inputui.plotTextEdit.clear()
         self.inputui.dataTextEdit.clear()
-        self.inputui.allCheckBox.setChecked(True)
-        self.inputui.selectallBtn.setChecked(True)
+        # 清除后无文件,回到默认不选择状态
+        self.inputui.allCheckBox.setChecked(False)
+        self.inputui.selectedCheckBox.setChecked(False)
+        self.inputui.selectallBtn.setChecked(False)
+        self.inputui.selectdataBtn.setChecked(False)
         #########清空输入的文件###############
 
         # 清空数据但保留空表格结构(至少 10 行)

@@ -218,6 +218,10 @@ class InputdataUI(object):
         self.selection_files_group.addButton(self.selectedCheckBox)
         self.selection_files_group.setExclusive(True)
 
+        # 默认不选择(导入文件后会在 Input.GetInputFiles 中自动设为 All)
+        self.allCheckBox.setChecked(False)
+        self.selectedCheckBox.setChecked(False)
+
 
         # 添加弹性空间，使复选框靠左对齐
         self.checkboxRow.addStretch()
@@ -318,6 +322,10 @@ class InputdataUI(object):
         self.selection_data_group.addButton(self.selectallBtn)
         self.selection_data_group.addButton(self.selectdataBtn)
         self.selection_data_group.setExclusive(True)
+
+        # 默认不选择(导入文件后会在 Input.GetInputFiles 中自动设为 All)
+        self.selectallBtn.setChecked(False)
+        self.selectdataBtn.setChecked(False)
 
         # 添加弹性空间，使复选框靠左对齐
         self.selectdataCBRow.addStretch()
