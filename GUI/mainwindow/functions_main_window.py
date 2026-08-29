@@ -1,4 +1,7 @@
 # IMPORT PACKAGES AND MODULES
+# ///////////////////////////////////////////////////////////////
+import os
+import webbrowser
 
 
 # IMPORT QT CORE
@@ -201,6 +204,13 @@ class MainFunctions():
                 MainFunctions.toggle_right_column(self)                # Show / Hide
             top_settings = MainFunctions.get_left_menu_btn(self, "btn_settings")  # Get Left Menu Btn
             top_settings.set_active_tab(False)
+
+        # SEARCH TITLE BAR
+        if btn.objectName() == "btn_search":
+            try:
+                webbrowser.open("https://www.github.com")
+            except Exception as e:
+                print(f"Failed to open browser: {e}")
 
         print(f"Button {btn.objectName()}, clicked!")        # DEBUG
 

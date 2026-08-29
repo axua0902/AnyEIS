@@ -192,10 +192,10 @@ class PyTitleBar(QWidget):
     # TITLE BAR MENU EMIT SIGNALS
     # ///////////////////////////////////////////////////////////////
     def btn_clicked(self):
-        self.clicked.emit(self.menu)
-    
+        self.clicked.emit(self.sender())
+
     def btn_released(self):
-        self.released.emit(self.menu)
+        self.released.emit(self.sender())
 
     # SET TITLE BAR TEXT
     # ///////////////////////////////////////////////////////////////
