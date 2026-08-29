@@ -106,6 +106,21 @@ class Ui_RightColumn(object):
         )
         self.paths_layout.addWidget(self.results_data_widget)
 
+        self.restore_defaults_btn = PyPushButton2(
+            text="Restore Default Paths",
+            font_size=self.settings.items["font"]["text_size_normal"],
+            font_weight=700,
+            radius=4,
+            font_color=self.themes.items["app_color"]["white"],
+            bg_color=self.themes.items["app_color"]["gray_primary"],
+            bg_color_hover=self.themes.items["app_color"]["gray_hover"],
+            bg_color_pressed=self.themes.items["app_color"]["gray_pressed"],
+            border_color="transparent",
+        )
+        self.restore_defaults_btn.setFixedHeight(36)
+        self.restore_defaults_btn.clicked.connect(self.on_restore_default_paths_clicked)
+        self.paths_layout.addWidget(self.restore_defaults_btn)
+
         self.main_layout.addWidget(self.paths_group)
 
     def create_path_row(self, label_text, path_value, callback):
@@ -124,8 +139,9 @@ class Ui_RightColumn(object):
         )
         layout.addWidget(label)
 
+        display_text = self._truncate_path(path_value) if path_value else "Click to set path..."
         path_btn = PyPushButton2(
-            text=path_value if path_value else "Click to set path...",
+            text=display_text,
             font_size=self.settings.items["font"]["text_size_utralsmall"],
             font_weight=600,
             radius=4,
@@ -140,6 +156,16 @@ class Ui_RightColumn(object):
         layout.addWidget(path_btn)
 
         return widget, path_btn
+
+    def _truncate_path(self, path, max_length=30):
+        """如果路径过长,只显示结尾部分(优先在路径分隔符处截断)"""
+        if not path or len(path) <= max_length:
+            return path
+        truncated = path[-(max_length - 3):]
+        sep_idx = max(truncated.find(os.sep), truncated.find("/"))
+        if sep_idx >= 0:
+            truncated = truncated[sep_idx:]
+        return "..." + truncated
 
     def create_export_image_section(self):
         self.export_group = QWidget()
@@ -321,10 +347,22 @@ class Ui_RightColumn(object):
             self.update_paths_display()
             QMessageBox.information(None, "Success", f"Results data path updated:\n{selected_path}")
 
+    def on_restore_default_paths_clicked(self):
+        self.settings.update_input_data_path("Data")
+        self.settings.update_reference_data_path("Data")
+        self.settings.update_results_data_path("Results")
+        self.top_settings = self.settings.get_top_settings()
+        self.update_paths_display()
+        QMessageBox.information(None, "Success", "Default paths restored:\nInput: Data\nReference: Data\nResults: Results")
+
     def update_paths_display(self):
-        self.input_data_btn.setText(self.top_settings.get("paths", {}).get("input_data", "Click to set path..."))
-        self.reference_data_btn.setText(self.top_settings.get("paths", {}).get("reference_data", "Click to set path..."))
-        self.results_data_btn.setText(self.top_settings.get("paths", {}).get("results_data", "Click to set path..."))
+        for btn, key in (
+            (self.input_data_btn, "input_data"),
+            (self.reference_data_btn, "reference_data"),
+            (self.results_data_btn, "results_data"),
+        ):
+            raw = self.top_settings.get("paths", {}).get(key, "")
+            btn.setText(self._truncate_path(raw) if raw else "Click to set path...")
 
     def on_format_changed(self, format):
         self.settings.update_export_image_format(format)

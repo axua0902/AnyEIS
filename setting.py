@@ -75,7 +75,11 @@ class Settings(object):
     # GET WORKING PATH
     # ///////////////////////////////////////////////////////////////
     def get_working_path(self):
-        return Settings._resolve_path(self.items.get("working_path"))
+        working_path = self.items.get("working_path")
+        if not working_path:
+            base_dir = os.path.dirname(os.path.abspath(Settings.settings_path))
+            working_path = os.path.join(base_dir, "Results")
+        return Settings._resolve_path(working_path)
 
     # CHANGE WORKING PATH
     # ///////////////////////////////////////////////////////////////
@@ -103,6 +107,16 @@ class Settings(object):
         if not isinstance(value, str):
             return value
         return Settings._resolve_path(value)
+
+    # UPDATE INPUT DATA PATH
+    # ///////////////////////////////////////////////////////////////
+    def update_input_data_path(self, path):
+        if "top_settings" not in self.items:
+            self.items["top_settings"] = {}
+        if "paths" not in self.items["top_settings"]:
+            self.items["top_settings"]["paths"] = {}
+        self.items["top_settings"]["paths"]["input_data"] = path
+        self.serialize()
 
     # UPDATE PENDING DATA PATH
     # ///////////////////////////////////////////////////////////////

@@ -213,7 +213,7 @@ class Ui_LeftSetting(object):
             QMessageBox.information(None, "Language / 语言", "Language changed to English / 语言已切换到英文")
 
     def on_help_clicked(self):
-        pdf_path = os.path.join(os.getcwd(), "Read me.pdf")
+        pdf_path = os.path.join(os.getcwd(), "Manual_EN.pdf")
         if os.path.exists(pdf_path):
             os.startfile(pdf_path)
         else:
