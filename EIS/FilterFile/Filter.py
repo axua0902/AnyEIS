@@ -799,9 +799,10 @@ class Datafilter(QWidget, DatafilterUI):
             orig_name = [self.prodataname[i] for i in range(0, n_pro, 2)]
             orig_select = [self.selectlist[i] for i in range(0, n_pro, 2)]
             orig_info_list = [self.dataInfo[i] for i in range(0, n_pro, 2)]
-            # 真实滤波结果(前 N 条,因为 filterring 对全 2N 滤波,后 N 条是副本滤波)
+            # 真实滤波结果:从 filteresults 中按偶数索引取(与 orig_data 对齐)
+            # 因为 filteresults 也是 2N 配对形式(原始+合成副本),前 N 个实际都是同一个数据集的滤波结果
             if filteresults and len(filteresults) == n_pro:
-                real_filtered = filteresults[:n]
+                real_filtered = [filteresults[i] for i in range(0, n_pro, 2)]
             else:
                 # 'Choose Method' 等情况:filteresults == self.prodata,直接用前 N
                 real_filtered = orig_data if (filteresults is self.prodata) else (

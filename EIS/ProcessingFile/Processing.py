@@ -458,8 +458,10 @@ class Dataprocess(QWidget, DataprocessUI):
             orig_name = [self.prodataname[i] for i in range(0, n_pro, 2)]
             orig_select = [self.selectlist[i] for i in range(0, n_pro, 2)]
             orig_info_list = [self.dataInfo[i] for i in range(0, n_pro, 2)]
+            # 真实处理结果:从 processresults 中按偶数索引取(与 orig_data 对齐)
+            # 因为 processresults 也是 2N 配对形式,前 N 个实际都是同一个数据集的处理结果
             if processresults and len(processresults) == n_pro:
-                real_filtered = processresults[:n]
+                real_filtered = [processresults[i] for i in range(0, n_pro, 2)]
             else:
                 real_filtered = orig_data if (processresults is self.prodata) else (
                     list(processresults) if processresults else orig_data

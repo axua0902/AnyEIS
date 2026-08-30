@@ -6,7 +6,6 @@
 import sys
 import os
 import ctypes
-from pathlib import Path
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
@@ -50,11 +49,6 @@ class MainWindow(QMainWindow):
 
         self.ui_config = SetupMainWindow(self.ui) # Initialize UI configuration
         self.ui_config.config_gui()# Configure UI
-
-        # 显式设置主窗口图标(避免仅依赖 QApplication 默认图标导致任务栏不生效)
-        logo_path = Path(__file__).resolve().parent / "logo.ico"
-        if logo_path.is_file():
-            self.setWindowIcon(QIcon(str(logo_path)))
 
         self.dragPos = None
 
@@ -100,23 +94,8 @@ class MainWindow(QMainWindow):
 # Set the initial class and also additional parameters of the "QApplication" class
 if __name__ == "__main__":
 
-    # Windows 任务栏分组:必须在 QApplication 创建之前设置 AppUserModelID,
-    # 让 AnyEIS 任务栏图标独立于 Python.exe
-    if sys.platform == "win32":
-        try:
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AnyEIS.App.1")
-        except Exception:
-            pass
-
     app = QApplication(sys.argv) # APPLICATION
-
-    # 用绝对路径解析 logo.ico,无论从哪个目录启动都能找到
-    if getattr(sys, "frozen", False):
-        BASE_DIR = Path(sys.executable).resolve().parent
-    else:
-        BASE_DIR = Path(__file__).resolve().parent
-    app.setWindowIcon(QIcon(str(BASE_DIR / "logo.ico")))
-
+    app.setWindowIcon(QIcon("logo.png"))
     window = MainWindow()
 
 
