@@ -162,11 +162,36 @@ class ProcessingMethodUIs:
         # Initialize refdata and refdataname lists with proper size
         if hasattr(self.parent, 'parent_processing_instance') and self.parent.parent_processing_instance:
             self.parent.parent_processing_instance.clearrefdata(2)
-        refdataname = ['Water', 'Alcohol', 'Air']
-        # Only show 2 units for Dielectric material
-        self.parent.uiUnit(0, 2, refdataname)
-        self.parent.uiUnit(1, 2, refdataname)
-        
+        # 第一个参考固定为 Air,第二个固定为 Water(DieMat 仅支持 Air+Water)
+        refdataname_air = ['Air']
+        refdataname_water = ['Water']
+        self.parent.uiUnit(0, 2, refdataname_air)
+        self.parent.uiUnit(1, 2, refdataname_water)
+
+        # 第一个参考:固定 Air,禁用 combobox 和浓度
+        if 0 in self.parent.refsoluionComboBox:
+            self.parent.refsoluionComboBox[0].setCurrentIndex(0)
+            self.parent.refsoluionComboBox[0].setEnabled(False)
+        if 0 in self.parent.concentrationTextEdit:
+            self.parent.concentrationTextEdit[0].setText('0')
+            self.parent.concentrationTextEdit[0].setEnabled(False)
+        if 0 in self.parent.concentrationLineEdit:
+            self.parent.concentrationLineEdit[0].setEnabled(False)
+        if 0 in self.parent.concentrationUnitLineEdit:
+            self.parent.concentrationUnitLineEdit[0].setEnabled(False)
+
+        # 第二个参考:固定 Water,禁用 combobox 和浓度
+        if 1 in self.parent.refsoluionComboBox:
+            self.parent.refsoluionComboBox[1].setCurrentIndex(0)
+            self.parent.refsoluionComboBox[1].setEnabled(False)
+        if 1 in self.parent.concentrationTextEdit:
+            self.parent.concentrationTextEdit[1].setText('0')
+            self.parent.concentrationTextEdit[1].setEnabled(False)
+        if 1 in self.parent.concentrationLineEdit:
+            self.parent.concentrationLineEdit[1].setEnabled(False)
+        if 1 in self.parent.concentrationUnitLineEdit:
+            self.parent.concentrationUnitLineEdit[1].setEnabled(False)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
 
