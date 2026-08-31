@@ -26,8 +26,26 @@ mu0=4*pi*1e-7# H/m  Permeability
 
 
 
-def paraplate(prodata,Gf):
-    print("Gf",Gf)
+def paraplate(prodata, Gf):
+    """
+    平行板电容器法 (Parallel Plate Capacitor) — 由测得阻抗计算 MUT (被测材料) 的介电常数与电导率。
+
+    适用场景:
+        - 已知电极几何因子 Gf (单位: m),由用户根据电极尺寸/间距手动填入
+        - 适用于以平行板电极测得的阻抗数据,直接换算为 ε 和 σ
+
+    计算公式:
+        ε_MUT = 1 / (jω·ε_0·Gf·Z)
+        σ_MUT = j·ω·ε_0·ε_MUT
+
+    参数:
+        prodata (list[DataFrame]): 测得的各样本阻抗数据,每条含 'FREQ[Hz]','Rs[ohm]','X[ohm]'
+        Gf (float): 几何因子 (电极面积 / 间距, 单位: m)
+
+    返回:
+        list[DataFrame]: 每条样本的 ε 和 σ,字段为 'FREQ[Hz]','EpsRE[-]','EpsIM[-]','SigmaRE[S/m]','SigmaIM[S/m]'
+    """
+    print("Gf", Gf)
     Reffreq1=prodata[0]['FREQ[Hz]']
     Refomega1=array(list(2*pi*Reffreq1))
     
@@ -38,10 +56,22 @@ def paraplate(prodata,Gf):
         Zmeasrued=ZREmeasrued+1.j*ZIMmeasrued
         Zexptest=array(Zmeasrued)
 
-        epsMUT=Zexptest/(Gf*(1+0j))
+        # [TP-001 修复] 平行板电容器复阻抗公式:
+        #     Z = 1/(jω·ε0·εr·Gf)
+        # =>  εr = 1/(jω·ε0·Gf·Z)
+        # =>  σ  = jω·ε0·εr
+        # 数值保护:
+        #   1) 避免 ω=0 (DC) 触发除零 → 用极小值替代
+        #   2) |Z|→0 时 εr 物理上为 ∞(理想短路) → 输出 inf 而非 NaN
+        with np.errstate(divide='ignore', invalid='ignore'):
+            omega_safe = np.where(Refomega1 == 0, 1e-30, Refomega1)
+            epsMUT = 1.0 / (1j * omega_safe * eps0 * Gf * Zexptest)
+            epsMUT = np.where(np.abs(Zexptest) < 1e-30,
+                              np.inf + 0j,
+                              epsMUT)
         sigmaMUT=1j*Refomega1*epsMUT*eps0
-        
-        Freq=prodata[temp]['FREQ[Hz]']       
+
+        Freq=prodata[temp]['FREQ[Hz]']
         resu=creatdatabaseEPS(Freq,epsMUT,sigmaMUT)
         resultsdata.append(resu)
 
@@ -51,8 +81,29 @@ def paraplate(prodata,Gf):
 
 
 #############################################calibrate##########################################################################
-def calibrate(refdata,prodata,params_info):
-    ############   get data ############ 
+def calibrate(refdata, prodata, params_info):
+    """
+    三步校准法 (Open/Short/Load Calibration) — 去除测试夹具和电缆的寄生阻抗,得到 MUT 真实阻抗。
+
+    适用场景:
+        - 同轴/夹具测量中,夹具和电缆的寄生阻抗影响不能忽略
+        - 通过三组参考测量 (开路 Open, 短路 Short, 负载 Load=50Ω) 求解 MUT 阻抗
+
+    计算公式 (传输/反射式双端口校准):
+        Z_MUT = Z_std · (Z_short − Z_meas) · (Z_load − Z_open) / [(Z_meas − Z_open) · (Z_short − Z_load)]
+
+    参数:
+        refdata (list[DataFrame]): 三组校准数据,索引由 params_info 指定
+        prodata (list[DataFrame]): 待测 MUT 的阻抗数据
+        params_info (dict): 需含
+            - 'open_index' (int): refdata 中开路参考的索引
+            - 'short_index' (int): refdata 中短路参考的索引
+            - 'load_index' (int): refdata 中负载参考的索引 (默认 Z_std=50Ω)
+
+    返回:
+        list[DataFrame]: 校准后 MUT 阻抗,字段 'FREQ[Hz]','Z[ohm]','PHASE[deg]','Rs[ohm]','X[ohm]'
+    """
+    ############   get data ############
     # Use params_info to get the correct indices for open, short, and load
     open_idx = params_info.get('open_index', 0)
     short_idx = params_info.get('short_index', 1)
@@ -99,8 +150,34 @@ def calibrate(refdata,prodata,params_info):
 
 
 #############################################permittivity calculate###########################################################################
-def DieMat(refdata,prodata,params_info):
+def DieMat(refdata, prodata, params_info):
+    """
+    介电材料法 (Dielectric Material Method) — 用 Air + Water 两种参考溶液,反求电极等效电路参数 (C0, Cr),进而计算 MUT 介电常数与电导率。
 
+    适用场景:
+        - 圆柱形/平行板电极(几何因子未知),通过两种已知介电常数的参考液校准
+        - 当前仅支持 Air (ε=1) + Water (ε 由 paraWater 计算) 组合
+        - 参考: Schwan H P 电气化学生物阻抗方法
+
+    计算思路:
+        1. 由 Air/Water 阻抗分别求出两参考液下的等效电容 C_air、C_water
+        2. 由 C_air、C_water 和 ε_air=1、ε_water 解线性方程组,得到 C0 (空载电容) 和 Cr (杂散电容)
+        3. 用 C0、Cr 反演 MUT 的 ε_MUT、σ_MUT
+
+    参数:
+        refdata (list[DataFrame]): 包含 Air 和 Water 两组参考阻抗
+        prodata (list[DataFrame]): 待测 MUT 阻抗数据
+        params_info (dict): 需含
+            - 'solution_parameters' (list[dict]): 长度 2,
+                [0]: Air 溶液信息 (含 'solution_index','name','temperature')
+                [1]: Water 溶液信息 (同上)
+
+    返回:
+        list[DataFrame]: MUT 介电常数/电导率,字段 'FREQ[Hz]','EpsRE[-]','EpsIM[-]','SigmaRE[S/m]','SigmaIM[S/m]'
+
+    异常:
+        当 air_name != 'Air' 或 water_name != 'Water' 时,静默打印 'DM wrong' 并返回 None。
+    """
     # 从params_info获取溶液信息
     solution_params = params_info['solution_parameters']
     
@@ -171,7 +248,33 @@ def DieMat(refdata,prodata,params_info):
 
 
 
-def threesolutions(refdata,prodata,params_info):
+def threesolutions(refdata, prodata, params_info):
+    """
+    三溶液法 (Three-Solution Method) — 用三种已知介电常数的参考溶液,无需求解电极几何参数,直接反演 MUT 介电常数与电导率。
+
+    适用场景:
+        - 同 DieMat,适用于几何因子未知的电极
+        - 通过三种不同介电常数的参考液 (NaCl、Water、Ethanol/Alcohol、Air 任选三种),利用线性插值关系求 ε_MUT
+        - 当电极几何/杂散无法用 2 种参考精确求解时,3 种参考可提供过约束,提高鲁棒性
+
+    计算思路 (基于双截距线性插值):
+        D = (Z_meas − Z_ref1)·(Z_ref2 − Z_ref3)·(ε_ref1 − ε_ref3)
+            / [(Z_meas − Z_ref2)·(Z_ref1 − Z_ref3)·(ε_ref2 − ε_ref3)]
+        ε_MUT = (ε_ref1 − D·ε_ref2) / (1 − D)
+
+    参数:
+        refdata (list[DataFrame]): 三种参考溶液的阻抗数据
+        prodata (list[DataFrame]): 待测 MUT 阻抗数据
+        params_info (dict): 需含
+            - 'solution_parameters' (list[dict]): 长度 3,每个含
+                - 'solution_index' (int): refdata 索引
+                - 'name' (str): 'NaCl' / 'Water' / 'Ethanol' / 'Alcohol' / 'Air'
+                - 'temperature' (float)
+                - 'concentration' (float, NaCl 时使用,mol/L)
+
+    返回:
+        list[DataFrame]: MUT 介电常数/电导率,字段 'FREQ[Hz]','EpsRE[-]','EpsIM[-]','SigmaRE[S/m]','SigmaIM[S/m]'
+    """
     CalSoleps1=list()
     CalSoleps2=list()
     CalSoleps3=list()
@@ -281,8 +384,39 @@ def threesolutions(refdata,prodata,params_info):
 
 
 
-def TLcalibrate(refdata,prodata,params_info):
-    
+def TLcalibrate(refdata, prodata, params_info):
+    """
+    传输线校准 (Transmission Line Calibration) — 求解同轴/传输线夹具的传播常数 γ,然后将 MUT 测量阻抗换算为溶液段真实阻抗。
+
+    适用场景:
+        - 同轴传输线型电解池(已知几何常数 Gf、测量段长度 ls、电极段长度 l2、特征阻抗 Z0)
+        - 通过测量一段已知溶液 (NaCl) 的阻抗,反推传输线寄生参数 γCable
+        - 然后用 γCable 校正所有 MUT 测量,得到 MUT 段真实阻抗
+
+    计算思路:
+        1. 由已知 NaCl 浓度/温度求 ε_NaCl,σ_NaCl
+        2. 由 ε、σ 推算 NaCl 段理论阻抗 CalZsol = Z0_sol / tanh(γ_sol·ls)
+        3. 由 Z_meas 求解 γCable (传输线校正传播常数)
+        4. 用 γCable 反演 MUT 段阻抗: Z_MUT = Z0·(Z0·tanh(γ·l2) − Z_meas) / (Z_meas·tanh(γ·l2) − Z0)
+
+    参数:
+        refdata (list[DataFrame]): NaCl 参考溶液的阻抗数据
+        prodata (list[DataFrame]): 待测 MUT 阻抗数据
+        params_info (dict): 需含
+            - 'processing_parameters' (dict):
+                - 'geometric_constant' (str→float): Gf
+                - 'solution_length' (str→float): ls
+                - 'electrode_length' (str→float): l2
+                - 'character_impedance' (str→float): Z0
+            - 'solution_parameters' (list[dict]): 长度 1,NaCl 溶液信息
+                (含 'name'='NaCl','temperature','concentration','solution_index')
+
+    返回:
+        list[DataFrame]: 校正后 MUT 阻抗,字段 'FREQ[Hz]','Z[ohm]','PHASE[deg]','Rs[ohm]','X[ohm]'
+
+    限制:
+        当前实现仅支持 NaCl 作为参考溶液;其他溶液会打印错误并直接返回。
+    """
     resultsdata=list()
     
     # 从params_info获取处理参数
@@ -356,7 +490,33 @@ def TLcalibrate(refdata,prodata,params_info):
 
 
 
-def TLcalculateEPS(prodata,params_info):
+def TLcalculateEPS(prodata, params_info):
+    """
+    传输线介电常数反演 (mpmath 实现) — 由 MUT 测量阻抗,数值反求 MUT 复介电常数 ε_MUT。
+
+    适用场景:
+        - 已用 TLcalibrate 得到 MUT 真实阻抗 SolZThe
+        - 由 SolZThe 数值求解每个频率点的复介电常数 ε(ω) = ε' − jε''
+        - 与 paraplate/DieMat 互补:paraplate 已知 Gf,TLcalculateEPS 已知 Gf+ls
+
+    计算公式 (传输线输入阻抗):
+        Z_meas = √((μ·μ0)/(ε·ε0)) / Gf / tanh(jω·√(μ·μ0·ε·ε0)·ls)
+
+    对每个频率点用 mpmath.findroot 数值求根,初值 ε=30。
+
+    参数:
+        prodata (list[DataFrame]): MUT 阻抗数据,字段 'FREQ[Hz]','Rs[ohm]','X[ohm]'
+        params_info (dict): 需含
+            - 'processing_parameters' (dict):
+                - 'geometric_constant' (str→float): Gf
+                - 'solution_length' (str→float): ls
+
+    返回:
+        list[DataFrame]: MUT 介电常数/电导率,字段 'FREQ[Hz]','EpsRE[-]','EpsIM[-]','SigmaRE[S/m]','SigmaIM[S/m]'
+
+    备注:
+        使用 mpmath 高精度求根,速度较慢但精度高;批量场景可改用 TLcalculateEPS_JAX 加速版。
+    """
     # 延迟导入: 仅在调用本函数时才加载 mpmath（避免 gmpy2 后端加载失败）
     # 注: 模块顶部已有 import mpmath as mp (line 15), 此处 import 为冗余保留以防万一
     mu1 = 1  # 相对磁导率
@@ -412,7 +572,20 @@ def TLcalculateEPS(prodata,params_info):
 
 def TLcalculateEPS_JAX(prodata, params_info):
     """
-    JAX-based implementation of TLcalculateEPS for improved performance
+    传输线介电常数反演 (JAX 加速版) — 与 TLcalculateEPS 计算逻辑相同,但用 JAX 进行向量化与 JIT 加速,适合大批量数据。
+
+    适用场景:
+        - 同 TLcalculateEPS,但样本数多、频率点多时显著加速
+        - 需安装 jax、jaxlib
+
+    实现要点:
+        - 复数介电常数拆为 (real, imag) 两路实数优化变量
+        - 使用 BFGS 算法向量化 (vmap) 处理所有频率点
+        - 自定义 stable_tanh 防止 tanh 在大参数下数值溢出
+        - 添加正则化项防止除零
+        - 目标函数: 100·|Z_meas − Z_theory|² / |Z_meas|² (相对误差平方)
+
+    参数/返回: 同 TLcalculateEPS
     """
     import jax
     import jax.numpy as jnp
@@ -521,7 +694,33 @@ def TLcalculateEPS_JAX(prodata, params_info):
 
 
 
-def TLcalculateEIS(prodata,params_info):
+def TLcalculateEIS(prodata, params_info):
+    """
+    传输线正演 (EIS) — 由 MUT 已知复介电常数 ε(ω),正向计算传输线输入阻抗 Z(ω)。
+
+    适用场景:
+        - 与 TLcalculateEPS 互为正/反问题
+        - 用于验证材料模型、生成合成数据、或在拟合流程中作为正演模型
+        - 输入需含 EpsRE/EpsIM 字段 (一般来自 TLcalculateEPS 输出)
+
+    计算公式:
+        η = √(μ·μ0 / (ε·ε0))    本征阻抗
+        z0 = η / Gf                特征阻抗
+        γ = j·ω·√(μ·μ0·ε·ε0)     传播常数
+        Z = z0 / tanh(γ·ls)        传输线输入阻抗
+
+    使用 mpmath 高精度计算(每个频率点),保证 tanh 在大参数下不溢出。
+
+    参数:
+        prodata (list[DataFrame]): MUT 介电常数数据,字段 'FREQ[Hz]','EpsRE[-]','EpsIM[-]'
+        params_info (dict): 需含
+            - 'processing_parameters' (dict):
+                - 'geometric_constant' (str→float): Gf
+                - 'solution_length' (str→float): ls
+
+    返回:
+        list[DataFrame]: MUT 阻抗,字段 'FREQ[Hz]','Z[ohm]','PHASE[deg]','Rs[ohm]','X[ohm]'
+    """
     # 注: 模块顶部已有 import mpmath as mp (line 15)
     mu1 = 1  # 相对磁导率
     mu0 = 4*pi*1e-7  # 真空磁导率
@@ -680,12 +879,30 @@ def TLcalculateEIS(prodata,params_info):
 
 
 def DRT():
+    """
+    弛豫时间分布 (Distribution of Relaxation Times, DRT) — 占位函数,待实现。
+
+    计划功能:
+        - 由测得阻抗谱 Z(ω) 反演连续的弛豫时间分布函数 γ(τ)
+        - 揭示被测体系的多物理过程 (电荷转移、扩散、双电层等),等价于无模型阻抗拟合
+        - 常用算法: Tikhonov 正则化、Maxwell 拟合、贝叶斯等
+    """
     pass
 
     return
 
 
-def creatdatabase(freq, Z):  #############创建结果数据库
+def creatdatabase(freq, Z):
+    """
+    由频域复阻抗 Z 创建结果 DataFrame (用于 paraplate/calibrate/TLcalibrate/TLcalculateEIS 等输出)。
+
+    字段:
+        - 'FREQ[Hz]': 频率
+        - 'Z[ohm]': 阻抗幅值 |Z|
+        - 'PHASE[deg]': 相位角 (°)
+        - 'Rs[ohm]': 实部 Re(Z)
+        - 'X[ohm]': 虚部 Im(Z)
+    """
     data = DataFrame()
     Z = Series(Z)
     data['FREQ[Hz]'] = freq
@@ -697,7 +914,17 @@ def creatdatabase(freq, Z):  #############创建结果数据库
     return data
 
 
-def creatdatabaseEPS(freq, epsMUT, sigmaMUT):  #############创建结果数据库
+def creatdatabaseEPS(freq, epsMUT, sigmaMUT):
+    """
+    由复介电常数 ε_MUT 和复电导率 σ_MUT 创建结果 DataFrame (用于 DieMat/threesolutions/TLcalculateEPS 等输出)。
+
+    字段:
+        - 'FREQ[Hz]': 频率
+        - 'EpsRE[-]': ε 实部
+        - 'EpsIM[-]': ε 虚部
+        - 'SigmaRE[S/m]': σ 实部
+        - 'SigmaIM[S/m]': σ 虚部
+    """
     RE = pd.Series(real(epsMUT))
     IM = pd.Series(imag(epsMUT))
     sigmaRE = pd.Series(real(sigmaMUT))
