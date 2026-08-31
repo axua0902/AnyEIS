@@ -192,6 +192,22 @@ class ProcessingMethodUIs:
         if 1 in self.parent.concentrationUnitLineEdit:
             self.parent.concentrationUnitLineEdit[1].setEnabled(False)
 
+        # [TP-002] Applicable conditions (static warning)
+        # DieMat assumes L=0, R=0, only suitable for f < 1 MHz on conductive electrolytes.
+        # At higher frequencies, use Three-Solution or Transmission Line methods instead.
+        from PySide6.QtWidgets import QLabel
+        self.dm_freq_note = QLabel(
+            "⚠ DieMat applicability: f < 1 MHz, conductive electrolytes (aqueous, biological tissue)\n"
+            "   At higher frequencies (f ≥ 1 MHz) errors become significant; "
+            "use Three-Solution or Transmission Line instead."
+        )
+        self.dm_freq_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.dm_freq_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.dm_freq_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
 
