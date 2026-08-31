@@ -56,13 +56,7 @@ def paraplate(prodata, Gf):
         Zmeasrued=ZREmeasrued+1.j*ZIMmeasrued
         Zexptest=array(Zmeasrued)
 
-        # [TP-001 修复] 平行板电容器复阻抗公式:
-        #     Z = 1/(jω·ε0·εr·Gf)
-        # =>  εr = 1/(jω·ε0·Gf·Z)
-        # =>  σ  = jω·ε0·εr
-        # 数值保护:
-        #   1) 避免 ω=0 (DC) 触发除零 → 用极小值替代
-        #   2) |Z|→0 时 εr 物理上为 ∞(理想短路) → 输出 inf 而非 NaN
+
         with np.errstate(divide='ignore', invalid='ignore'):
             omega_safe = np.where(Refomega1 == 0, 1e-30, Refomega1)
             epsMUT = 1.0 / (1j * omega_safe * eps0 * Gf * Zexptest)
