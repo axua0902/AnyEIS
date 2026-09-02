@@ -220,7 +220,60 @@ def check5(data):  #判断数据类型
         return 'DS'
     else:
         return 'UNKNOWN'
-    
+
+def check6_freq_consistency(prodata, refdata, rtol_log=1e-3):
+    """
+    Check if prodata and refdata have approximately consistent frequency points.
+
+    For logarithmic frequency distributions (typical for EIS), exact equality
+    is too strict because different data sources may keep different numbers
+    of decimal places. This check uses a relative tolerance in log space:
+        max|log10(f_pro) - log10(f_ref)| <= rtol_log
+
+    Default rtol_log = 1e-3 means the relative frequency difference
+    is allowed up to ~0.23% (10^0.001 ≈ 1.0023).
+
+    Returns:
+        1: frequencies are consistent (within tolerance)
+        0: frequencies are inconsistent (with details printed)
+    """
+    # [TP-003] 频率一致性检查(对数空间相对容差)
+    import numpy as np
+    if not prodata or not refdata:
+        return 1  # 无数据时跳过
+
+    if 'FREQ[Hz]' not in prodata[0].columns or 'FREQ[Hz]' not in refdata[0].columns:
+        print('FREQ[Hz] column not found, skip check6')
+        return 1
+
+    pro_freq = prodata[0]['FREQ[Hz]'].values
+    ref_freq = refdata[0]['FREQ[Hz]'].values
+
+    # 长度必须一致
+    if len(pro_freq) != len(ref_freq):
+        print(f'check6 fail: frequency length mismatch '
+              f'(pro={len(pro_freq)}, ref={len(ref_freq)})')
+        return 0
+
+    # 排除 f = 0 (DC) 避免 log10 报错
+    pro_pos = pro_freq[pro_freq > 0]
+    ref_pos = ref_freq[ref_freq > 0]
+    if len(pro_pos) != len(ref_pos):
+        print(f'check6 fail: non-DC frequency count mismatch '
+              f'(pro={len(pro_pos)}, ref={len(ref_pos)})')
+        return 0
+
+    # 对数空间相对误差
+    log_diff = np.abs(np.log10(pro_pos) - np.log10(ref_pos))
+    max_log_diff = float(np.max(log_diff))
+    if max_log_diff > rtol_log:
+        print(f'check6 fail: frequency log-space diff {max_log_diff:.4e} '
+              f'> tolerance {rtol_log}')
+        return 0
+
+    print('check6 (freq consistency) pass')
+    return 1
+
 ##################################数据检查#############################
 
 

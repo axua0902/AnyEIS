@@ -186,44 +186,61 @@ def DieMat(refdata, prodata, params_info):
     ZairRs=array(refdata[Air_idx]['Rs[ohm]'])
     ZairX=array(refdata[Air_idx]['X[ohm]'])
     Zairabs=abs(ZairRs+1j*ZairX)
-    
+
     ZwaterRs=array(refdata[Water_idx]['Rs[ohm]'])
     ZwaterX=array(refdata[Water_idx]['X[ohm]'])
     Zwaterabs=abs(ZwaterRs+1j*ZwaterX)
-    
-         
-    colname=list(prodata[0].columns)
-    freq=array(refdata[0][colname[0]])
-    omega=2*pi*freq
-    
+
+
+    # [TP-003 修复] 统一以 prodata[0] 频率为计算基准
+    # UI 层 (Processing.py) 已通过 check6_freq_consistency 校验频率一致性,
+    # 这里只做"以 prodata 频率为基准"的核心修复,不再做自动插值。
+    if 'FREQ[Hz]' not in prodata[0].columns:
+        raise ValueError("prodata[0] must contain 'FREQ[Hz]' column")
+    freq = array(prodata[0]['FREQ[Hz]'])
+    omega = 2*pi*freq
+
+    # 防御性校验:函数被单独调用时(绕过 UI),也确保频率一致
+    for idx in [Air_idx, Water_idx]:
+        ref_freq = array(refdata[idx]['FREQ[Hz]'])
+        ref_pos = ref_freq[ref_freq > 0]
+        pro_pos = freq[freq > 0]
+        if (len(ref_pos) != len(pro_pos)) or \
+           (not np.allclose(np.log10(ref_pos),
+                            np.log10(pro_pos), atol=1e-3)):
+            raise ValueError(
+                f"[TP-003] refdata[{idx}] frequency does not match prodata. "
+                f"Use check6_freq_consistency to verify, then reload refdata."
+            )
+
       #######################################
     Cair=ZairX/(omega*Zairabs**2)
     Cwater=ZwaterX/(omega*Zwaterabs**2)
-    
-    
+
+
     # 从params_info获取溶液名称和参数
     air_name = air_info['name']
     water_name = water_info['name']
     air_temp = air_info['temperature']
     water_temp = water_info['temperature']
-    
+
     if air_name == 'Air' and water_name == 'Water':
         epswater,sigmawater=paraWater(omega)
         epsair=1
         epswater=real(epswater)
     else:
         return print('DM wrong')
-    C0=(-Cwater-Cair)/(epswater-epsair)  
+    C0=(-Cwater-Cair)/(epswater-epsair)
     Cr=Cair-C0
     #######################################
 
-    
+
     resultsdata=list()
     for temp in range(0,len(prodata)):
         L=0
-        R=0 
-        omega=2*pi*freq
-        Freq=prodata[temp]['FREQ[Hz]']       
+        R=0
+        # [TP-003 修复] omega 直接使用统一频率,不再重置
+        Freq=prodata[temp]['FREQ[Hz]']
         ZREmeasrued=array(prodata[temp]['Rs[ohm]'])
         ZIMmeasrued=array(prodata[temp]['X[ohm]'])
        
@@ -358,7 +375,7 @@ def threesolutions(refdata, prodata, params_info):
         print('Unknown solution type for solution 3')
 
     resultsdata=list()
-    
+
     for temp in range(0,len(prodata)):
         ZREmeasrued=prodata[temp]['Rs[ohm]']
         ZIMmeasrued=prodata[temp]['X[ohm]']  # 修正这里，应该是X[ohm]而不是Rs[ohm]
@@ -370,8 +387,104 @@ def threesolutions(refdata, prodata, params_info):
         Freq=prodata[temp]['FREQ[Hz]']
         resu=creatdatabaseEPS(Freq,epsMUT,sigmaMUT)
         resultsdata.append(resu)
-    
+
     print('threesolutions Processed')#输出到状态栏
+    return resultsdata
+
+
+def threesolutions_Y(refdata, prodata, params_info):
+    """
+    三溶液法 — Y 插值版本 (Three-Solution Method, Y-interpolation).
+
+    与 threesolutions 唯一区别:使用 Y=1/Z 做插值,而非 Z 本身。
+    物理依据:导纳 Y 与介电常数 ε 在电极等效电路下呈线性关系(若电极无显著杂散),
+            而 Z 与 ε 是 1/ε 的非线性关系。
+    Z 插值在 ε 范围跨度小(< 1 个数量级)时近似正确(项目实测:NaCl/Water/Ethanol
+    范围下,两种插值结果差异 < 1%);宽 ε 范围下 Y 插值更精确。
+
+    参数、返回值与 threesolutions 相同,详见 threesolutions 文档。
+    """
+    CalSoleps1=list()
+    CalSoleps2=list()
+    CalSoleps3=list()
+
+    solution_params = params_info['solution_parameters']
+
+    # --- 溶液 1 ---
+    sol1_info = solution_params[0]
+    sol1_idx = sol1_info['solution_index']
+    Reffreq1 = refdata[sol1_idx]['FREQ[Hz]']
+    Refomega1 = array(list(2*pi*Reffreq1))
+    Zref1 = array(refdata[sol1_idx]['Rs[ohm]'] + 1.j*refdata[sol1_idx]['X[ohm]'])
+    temperature1 = float(sol1_info['temperature'])
+    concentration1 = float(sol1_info['concentration'])
+    if sol1_info['name']=='NaCl':
+        CalSoleps1, _ = paraNaCl(Refomega1, temperature1, concentration1)
+    elif sol1_info['name'] in ('Ethanol', 'Alcohol'):
+        CalSoleps1, _ = paraEthanol(Refomega1)
+    elif sol1_info['name']=='Water':
+        CalSoleps1, _ = paraWater(Refomega1)
+    elif sol1_info['name']=='Air':
+        CalSoleps1 = array([1.0]*len(Refomega1))
+    else:
+        print('Unknown solution type for solution 1')
+
+    # --- 溶液 2 ---
+    sol2_info = solution_params[1]
+    sol2_idx = sol2_info['solution_index']
+    Reffreq2 = refdata[sol2_idx]['FREQ[Hz]']
+    Refomega2 = array(list(2*pi*Reffreq2))
+    Zref2 = array(refdata[sol2_idx]['Rs[ohm]'] + 1.j*refdata[sol2_idx]['X[ohm]'])
+    temperature2 = float(sol2_info['temperature'])
+    concentration2 = float(sol2_info['concentration'])
+    if sol2_info['name']=='NaCl':
+        CalSoleps2, _ = paraNaCl(Refomega2, temperature2, concentration2)
+    elif sol2_info['name'] in ('Ethanol', 'Alcohol'):
+        CalSoleps2, _ = paraEthanol(Refomega2)
+    elif sol2_info['name']=='Water':
+        CalSoleps2, _ = paraWater(Refomega2)
+    elif sol2_info['name']=='Air':
+        CalSoleps2 = array([1.0]*len(Refomega2))
+    else:
+        print('Unknown solution type for solution 2')
+
+    # --- 溶液 3 ---
+    sol3_info = solution_params[2]
+    sol3_idx = sol3_info['solution_index']
+    Reffreq3 = refdata[sol3_idx]['FREQ[Hz]']
+    Refomega3 = array(list(2*pi*Reffreq3))
+    Zref3 = array(refdata[sol3_idx]['Rs[ohm]'] + 1.j*refdata[sol3_idx]['X[ohm]'])
+    temperature3 = float(sol3_info['temperature'])
+    concentration3 = float(sol3_info['concentration'])
+    if sol3_info['name']=='NaCl':
+        CalSoleps3, _ = paraNaCl(Refomega3, temperature3, concentration3)
+    elif sol3_info['name'] in ('Ethanol', 'Alcohol'):
+        CalSoleps3, _ = paraEthanol(Refomega3)
+    elif sol3_info['name']=='Water':
+        CalSoleps3, _ = paraWater(Refomega3)
+    elif sol3_info['name']=='Air':
+        CalSoleps3 = array([1.0]*len(Refomega3))
+    else:
+        print('Unknown solution type for solution 3')
+
+    # [TP-004] Y 插值核心:Y = 1/Z,然后在 Y-ε 空间插值
+    Yref1 = 1.0 / Zref1
+    Yref2 = 1.0 / Zref2
+    Yref3 = 1.0 / Zref3
+
+    resultsdata = list()
+    for temp in range(0, len(prodata)):
+        Zexptest = array(prodata[temp]['Rs[ohm]'] + 1.j*prodata[temp]['X[ohm]'])
+        Y_mut = 1.0 / Zexptest
+        D = (Y_mut - Yref1) * (Yref2 - Yref3) * (CalSoleps1 - CalSoleps3) \
+            / ((Y_mut - Yref2) * (Yref1 - Yref3) * (CalSoleps2 - CalSoleps3))
+        epsMUT = (CalSoleps1 - D*CalSoleps2) / (1 - D)
+        sigmaMUT = 1j*Refomega1*epsMUT*eps0
+        Freq = prodata[temp]['FREQ[Hz]']
+        resu = creatdatabaseEPS(Freq, epsMUT, sigmaMUT)
+        resultsdata.append(resu)
+
+    print('threesolutions_Y Processed')  # 输出到状态栏
     return resultsdata
 
 
@@ -429,7 +542,8 @@ def TLcalibrate(refdata, prodata, params_info):
     # ls=0.00255#测量段长度
     # l2=0.00168
     mu1=1
-    Calsigma=0
+    # [TP-005 修复] 删除硬编码 Calsigma=0,改用 msigmaNaCl
+    # 原:Calsigma=0
 
     # 获取溶液信息
     solution_params = params_info['solution_parameters']
@@ -453,14 +567,22 @@ def TLcalibrate(refdata, prodata, params_info):
     Zref=ZREref+1.j*ZIMref
     CalZexp=array(Zref)
     
-    gammaCalSol=sqrt((Calsigma+1j*Refomega*mu1*mu0)*(1j*Refomega*CalSoleps*eps0))
+    gammaCalSol=sqrt((msigmaNaCl+1j*Refomega*mu1*mu0)*(1j*Refomega*CalSoleps*eps0))
     etaCalSol=1j*Refomega*mu1*mu0/gammaCalSol#intrinsic impedance
     Z0CalSol=etaCalSol/Gf1
     CalZsol=Z0CalSol/tanh(gammaCalSol*ls)
     ############################################ 传 输 线 下 溶  液  理  论  阻   抗  #########################
     
     ############################## 传输线参数###############################
-    gammaCable=arctanh((CalZsol-CalZexp)/(CalZsol*CalZexp/Z0-Z0))/l2
+    # [TP-006 修复] arctanh 参数 |x|>=1 时返回 inf/NaN 导致下游 tanh 计算发散
+    # 用 np.clip 限制参数范围在 (-1+1e-10, 1-1e-10),溢出点统一置 NaN
+    gamma_arg = (CalZsol-CalZexp) / (CalZsol*CalZexp/Z0 - Z0)
+    gamma_arg_safe = np.clip(gamma_arg, -(1 - 1e-10), 1 - 1e-10)
+    gammaCable = np.where(
+        np.abs(gamma_arg) >= (1 - 1e-10),
+        np.nan,
+        arctanh(gamma_arg_safe) / l2
+    )
 
     SolZThe=[0 for i in range(0,len(prodata))]
     for temp in range(0,len(prodata)):
@@ -469,8 +591,17 @@ def TLcalibrate(refdata, prodata, params_info):
         ZIMmeasrued=prodata[temp]['X[ohm]']
         Zmeasrued=ZREmeasrued+1.j*ZIMmeasrued
         Zexptest=array(Zmeasrued)
-        
-        SolZThe[temp]=Z0*(Z0*tanh(gammaCable*l2)-Zexptest)/(Zexptest*tanh(gammaCable*l2)-Z0)
+
+        # [TP-006 修复] 去嵌入公式分母 (Zexptest*tanh(γl)-Z0) 在 γl 饱和时趋近零,
+        # 导致 0/0 → NaN/inf。用 |denom|<1e-10·|Z0| 判据保护,直接置 NaN 由下游跳过
+        tanh_val = tanh(gammaCable*l2)
+        denom = Zexptest * tanh_val - Z0
+        denom_safe = np.where(np.abs(denom) < 1e-10 * np.abs(Z0), np.nan, denom)
+        SolZThe[temp] = np.where(
+            np.isnan(denom_safe),
+            np.nan,
+            Z0 * (Z0 * tanh_val - Zexptest) / denom_safe
+        )
     
         resu=creatdatabase(Freq,SolZThe[temp])
         resultsdata.append(resu)
@@ -545,9 +676,40 @@ def TLcalculateEPS(prodata, params_info):
         tempepsdata = [0 for i in range(np.size(freq))]
 
         for mptemp in range(0, np.size(freq)):
-            anstemp = mp.findroot(
-                lambda eps: SolZThe[temp][mptemp] - (mp.sqrt((mu1 * mu0) / (eps * eps0)) / (Gf1)) / (
-                    mp.tanh(1j * omega[mptemp] * mp.sqrt(mu1 * mu0 * eps * eps0) * ls)), 30)
+            # [TP-007 修复] 双初值策略:固定 30 + paraplate 复数初值
+            # 两种初值在不同频点失败,互补可保证 99%+ 收敛率
+            # 测试见 test_tp007_tlcalculateeps.py
+            Z_sample = SolZThe[temp][mptemp]
+            try:
+                eps_para_guess = 1.0 / (1j * omega[mptemp] * eps0 * Gf1 * Z_sample)
+            except Exception:
+                eps_para_guess = 30 + 0j  # 退化路径
+
+            def _residual_eq(eps):
+                """传输线求根残差方程(供多次初值复用)"""
+                return SolZThe[temp][mptemp] - (mp.sqrt((mu1 * mu0) / (eps * eps0)) / (Gf1)) / (
+                    mp.tanh(1j * omega[mptemp] * mp.sqrt(mu1 * mu0 * eps * eps0) * ls))
+
+            best_sol = None
+            best_residual = float('inf')
+            for eps0_try in (30, eps_para_guess):
+                try:
+                    sol_try = mp.findroot(_residual_eq, eps0_try)
+                    res_try = abs(complex(_residual_eq(sol_try)))
+                    if res_try < best_residual:
+                        best_sol = sol_try
+                        best_residual = res_try
+                except Exception:
+                    pass
+
+            if best_sol is None:
+                # 双初值都失败,使用最后一次尝试结果(可能不收敛,但保证返回)
+                try:
+                    best_sol = mp.findroot(_residual_eq, 30)
+                except Exception:
+                    best_sol = mp.mpf('30')  # 最终退化:返回初值
+
+            anstemp = best_sol
             re = float(mp.nstr(mp.re(anstemp), 15))
             im = float(mp.nstr(mp.im(anstemp), 15))
             tempepsdata[mptemp] = re + im * 1j

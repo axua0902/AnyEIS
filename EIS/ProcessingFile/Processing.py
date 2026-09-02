@@ -346,6 +346,18 @@ class Dataprocess(QWidget, DataprocessUI):
 
         elif currentmethod == 'Dielectric Material Method':  ###使用两种参考溶液计算介电常数
             if check3(self.refdata, self.refdataname) == 1 and check5(self.refdata) == 'EIS':
+                # [TP-003] 频率一致性预检(refdata vs prodata)
+                # check6 不通过时,直接报错并停止,不允许继续计算
+                if check6_freq_consistency(self.prodata, self.refdata) == 0:
+                    QMessageBox.critical(
+                        self, "Frequency Inconsistency",
+                        "Reference data frequency does not match processing data.\n\n"
+                        "DieMat requires consistent frequency points between "
+                        "refdata and prodata.\n"
+                        "Please reload reference data with the same frequency grid "
+                        "as the processing data."
+                    )
+                    return
                 params_info = self.get_parameters_info()  # 获取参数
                 print('params:',params_info)
                 processresults = DieMat(self.refdata, self.prodata, params_info)
