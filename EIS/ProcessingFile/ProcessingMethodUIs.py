@@ -112,7 +112,25 @@ class ProcessingMethodUIs:
                 self.parent.refdataBtn[i].clicked.connect(lambda checked, n=i: self.parent.parent_processing_instance.GetrefFiles(n + 1))
                 self.parent.openreffilebtn[i].clicked.connect(lambda checked, n=i: self.parent.parent_processing_instance.OpenFiles(n + 1))
                 self.parent.deletereffilebtn[i].clicked.connect(lambda checked, n=i: self.parent.parent_processing_instance.ClearrefFiles(n + 1))
-        
+
+        # [适用条件] System Calibration 是 OSL 三步校准 (Open/Short/Load):
+        # Z_MUT = Z_std·(Z_short−Z_meas)·(Z_load−Z_open) / [(Z_meas−Z_open)·(Z_short−Z_load)]
+        # 与 TLcalibrate 不同:不需要已知介电参数,但需要三组标准件参考测量。
+        # 限制:当 Z_meas → Z_open 时公式退化 (分母→0);Load 阻抗需已知 (默认 50 Ω)。
+        from PySide6.QtWidgets import QLabel
+        self.syscal_note = QLabel(
+            "⚠ System Calibration applicability: requires 3 reference standards (Open, Short, Load=50 Ω)\n"
+            "   OSL formula: Z_MUT = Z_std·(Z_short−Z_meas)·(Z_load−Z_open) / [(Z_meas−Z_open)·(Z_short−Z_load)].\n"
+            "   Degrades when Z_meas ≈ Z_open (denominator → 0). No dielectric parameters needed, "
+            "applicable from low frequency to GHz; use TLcalibrate if reference solution (e.g. NaCl) is preferred."
+        )
+        self.syscal_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.syscal_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.syscal_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
 
@@ -152,9 +170,29 @@ class ProcessingMethodUIs:
 
         ppLayout.addStretch()
         self.parent.DPsublayout2.addWidget(ppContainer)
-        
+
+        # [适用条件] Parallel Plate Capacitor 直接由 Z(ω) 反演 ε、σ:
+        #     εr = 1/(jω·ε0·Gf·Z),  σ = 1/(Gf·Z)   (平行板 R‖C 物理模型, TP-001/TP-008)
+        # 假设:电极间为均匀介质,无引线电感,无接触电阻。
+        # 适用:低/中频段 (< 100 MHz),薄膜/低损样品;
+        #     不适用:含电极极化的电解池 (高 σ 溶液,例如 NaCl > 0.1M) — 请改用 TL 系列。
+        from PySide6.QtWidgets import QLabel
+        self.pp_note = QLabel(
+            "⚠ Parallel Plate Capacitor applicability: requires only Gf; assumes uniform R‖C medium\n"
+            "   Formula: εᵣ = 1/(jω·ε₀·Gf·Z),  σ = 1/(Gf·Z)   (lossless plate-capacitor model).\n"
+            "   Valid for thin films / low-loss samples (f < 100 MHz). Not suitable for conductive "
+            "electrolytes with electrode polarization — use TL series instead."
+        )
+        self.pp_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.pp_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.pp_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
+
 
     def ui_DielectricMaterial(self):
         self.parent.freshprocessUI()
@@ -223,7 +261,27 @@ class ProcessingMethodUIs:
         self.parent.uiUnit(0, 2, refdataname)
         self.parent.uiUnit(1, 2, refdataname)
         self.parent.uiUnit(2, 2, refdataname)
-        
+
+        # [适用条件] Three-Solution Method 用三种不同浓度/类型的参考液 (NaCl/Water/Ethanol)
+        # 反演未知样品的 ε、σ。插值用 Z(实测差异 < 0.0001%, TP-004 已确认低优先级);
+        # 也可使用 threesolutions_Y (Y 插值) 作为对照。
+        # 适用:宽频段 (10 kHz - 10 MHz),适合含电极极化的导电样品;
+        #     不需要几何参数,但需要三组参考液校准。
+        from PySide6.QtWidgets import QLabel
+        self.ts_note = QLabel(
+            "⚠ Three-Solution Method applicability: requires 3 reference solutions (NaCl/Water/Ethanol)\n"
+            "   Inverse problem: 3 ref. solutions + interpolation (Z-based, threesolutions_Y available) "
+            "to recover ε(ω) and σ(ω) of unknown sample.\n"
+            "   Valid for 10 kHz - 10 MHz, suitable for conductive electrolytes. No geometric parameter "
+            "needed, but the 3 references must have well-separated (ε, σ)."
+        )
+        self.ts_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.ts_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.ts_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
 
@@ -388,9 +446,26 @@ class ProcessingMethodUIs:
 
         tlLayout.addWidget(tlRow2)
         self.parent.DPsublayout2.addWidget(tlContainer)
-        
+
+        # [TP-006 适用条件] TLcalibrate 用参考液反推 γCable,在高频段 (γl 饱和)
+        # 反推的 γCable 和去嵌入的 Z_mut 可能返回 NaN。
+        # 适用:低/中频段 (f < 1 GHz) + 已知参考液 (NaCl/Water/Ethanol/Air)。
+        from PySide6.QtWidgets import QLabel
+        self.tlcal_note = QLabel(
+            "⚠ RF Impedance Calibration applicability: f < 1 GHz, known reference solution required\n"
+            "   At higher frequencies (f ≥ 1 GHz) γ·l saturates and tanh/arctanh become numerically unstable; "
+            "the recovered Z_mut will be marked NaN. Use TLcalculateEIS (forward) for verification."
+        )
+        self.tlcal_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.tlcal_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.tlcal_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
+
 
     def ui_TransmissionLine_cal(self):
         self.parent.freshprocessUI()
@@ -486,11 +561,28 @@ class ProcessingMethodUIs:
         tlLayout.addWidget(tlRow2)
         self.parent.DPsublayout2.addWidget(tlContainer)
 
+        # [适用条件] TLcalculateEPS 是传输线反问题:已知校准后的 Z(ω) → 求 ε(ω)。
+        # 前提:需要先调用 RF Impedance Calibration 校准 (TLcalibrate) 得到去嵌入的 Z。
+        # 算法:用 mpmath.findroot 数值反求,已应用双初值策略 (30 + paraplate 复数初值)
+        # 提升极端 ε' 样品的收敛性 (TP-007 修复)。
+        # 限制:依赖校准结果,高频段 (γl 饱和) 输入 Z 失效,需在该频段使用其他方法。
+        from PySide6.QtWidgets import QLabel
+        self.tlcaldiel_note = QLabel(
+            "⚠ RF Dielectric Calculation applicability: requires prior TLcalibrate (Open/NaCl reference)\n"
+            "   Inverse problem: Z(ω) → ε(ω) via mpmath.findroot, with dual-initial-guess "
+            "(ε=30 + ε_paraplate) for robust convergence on extreme samples.\n"
+            "   Depends on calibrated Z; high-frequency band (γ·l saturates) will propagate NaN. "
+            "Pair with TLcalculateEIS (forward) for ε → Z → ε round-trip verification."
+        )
+        self.tlcaldiel_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.tlcaldiel_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.tlcaldiel_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
-
-
-
 
 
     def ui_TransmissionLine_EIScal(self):
@@ -587,14 +679,25 @@ class ProcessingMethodUIs:
         tlLayout.addWidget(tlRow2)
         self.parent.DPsublayout2.addWidget(tlContainer)
 
+        # [适用条件] TLcalculateEIS 是传输线正演:已知 ε(ω) → 求 Z(ω)。
+        # 输入要求:prodata 必须含 EpsRE/EpsIM 字段 (即 check5='DS')。
+        # 与 RF Dielectric Calculation (反问题: Z → ε) 互为正/反操作,
+        # 主要用于材料模型验证、合成数据生成、或拟合流程中的正演模型。
+        from PySide6.QtWidgets import QLabel
+        self.tleis_note = QLabel(
+            "⚠ RF Impedance Calculation applicability: prodata must contain EpsRE/EpsIM (dielectric spectrum)\n"
+            "   Forward model: Z(ω) = (η/Gf) / tanh(γ·ls) with γ = jω√(με). "
+            "Pair with RF Dielectric Calculation (inverse) for ε → Z → ε consistency checks."
+        )
+        self.tleis_note.setStyleSheet(
+            "color: #aa6600; background-color: #fff8e1; "
+            "padding: 6px; border: 1px solid #e0c080; border-radius: 4px;"
+        )
+        self.tleis_note.setWordWrap(True)
+        self.parent.DPsublayout2.addWidget(self.tleis_note)
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
-
-
-
-
-
-
 
 
     def uiKKDS(self):
@@ -737,6 +840,6 @@ class ProcessingMethodUIs:
         paramLayout.addStretch()
         otherLayout.addWidget(paramRow)
         self.parent.DPsublayout2.addWidget(otherContainer)
-        
+
         # Add spacer to fill remaining space
         self.parent.DPsublayout2.addStretch()
