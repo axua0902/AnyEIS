@@ -214,8 +214,17 @@ def DieMat(refdata, prodata, params_info):
             )
 
       #######################################
-    Cair=ZairX/(omega*Zairabs**2)
-    Cwater=ZwaterX/(omega*Zwaterabs**2)
+    # [TP-009 修复] 改用物理正值约定 (与 DieMatPark / 文档 §13 一致)
+    #   原:  Cair  =  ZairX / (omega*Zairabs**2)   # 带符号,容性时为负
+    #        Cwater = ZwaterX / (omega*Zwaterabs**2)
+    #        C0  = (-Cwater - Cair) / (epswater - epsair)   # ❌ 公式符号错
+    #        Cr  =  Cair - C0
+    #   修:  C_meas = -Z_IM / (omega*|Z|^2)  (容性时为正,符合文档 §13)
+    #        C0  = (Cwater - Cair) / (epswater - epsair)   # ✅ 物理公式
+    #        Cr  =  Cair - C0*epsair
+    #   验证: 见 test_DieMat_vs_DieMatPark.py — ε' max err 从 173% 降至 0
+    Cair=-ZairX/(omega*Zairabs**2)
+    Cwater=-ZwaterX/(omega*Zwaterabs**2)
 
 
     # 从params_info获取溶液名称和参数
@@ -230,8 +239,8 @@ def DieMat(refdata, prodata, params_info):
         epswater=real(epswater)
     else:
         return print('DM wrong')
-    C0=(-Cwater-Cair)/(epswater-epsair)
-    Cr=Cair-C0
+    C0=(Cwater-Cair)/(epswater-epsair)
+    Cr=Cair-C0*epsair
     #######################################
 
 
@@ -247,14 +256,199 @@ def DieMat(refdata, prodata, params_info):
         epsp1=(ZREmeasrued-R)**2+(ZIMmeasrued-omega*L)**2
         epsMUT=(1/C0)*((omega*L-ZIMmeasrued)/(omega*epsp1))-(Cr/C0)
         sigmaMUT=(eps0/C0)*((ZREmeasrued-R)/epsp1)
-        
-        resu=creatdatabaseEPS(Freq,epsMUT,sigmaMUT)
+
+        # [TP-016 新增] 由 σ_dc 显式反推 ε'' (导电贡献)
+        #   物理: σ* = jωε₀ε* = jωε₀(ε' − jε'')
+        #        ⇒ σ_real = ωε₀ε''
+        #        ⇒ ε''   = σ_real / (ωε₀)
+        #   意义: DieMat 原本 EpsIM=0,sigmaIM=0,现在输出完整复介电常数
+        #        与 DieMatPark 的 ε* = ε' − jε'' 定义一致
+        with np.errstate(divide='ignore', invalid='ignore'):
+            eps_im_MUT = np.where(
+                omega == 0,
+                np.inf,                     # DC 频点: ε''→∞ (纯导电)
+                sigmaMUT / (omega * eps0)   # ε'' = σ_dc / (ωε₀)
+            )
+        # 装配复介电常数 (ε* = ε' − jε'')
+        epsMUT_complex   = epsMUT - 1j * eps_im_MUT
+        sigmaMUT_complex = 1j * omega * epsMUT_complex * eps0
+
+        resu=creatdatabaseEPS(Freq,epsMUT_complex,sigmaMUT_complex)
         resultsdata.append(resu)
 
     print('DieMat Processed')#输出到状态栏
     return resultsdata
 
 
+
+
+def DieMatPark(refdata, prodata, params_info):
+    """
+    Park 法 (Multi-Standard Linear Regression) — 通过多个已知介电常数的标准样品,
+    对测量系统做线性回归,得到 C_0 (几何参数) 和 C_p (杂散电容),再反演 MUT 的
+    复介电常数 ε* = ε' − jε''。
+
+    参考文档: 基于阻抗谱的复介电参数测量方法.md (基于 Park 2003 论文)。
+
+    适用场景:
+        - 几何因子未知或难以用理想平行板模型描述的传感器 (探针/同轴等)
+        - 有多个 (≥2) 已知介电常数的标准样品可用 (Air / Water / Ethanol / NaCl)
+        - 需要同时获得 ε'(实部,极化储能) 和 ε''(虚部,损耗)
+        - 多标准样品线性回归可降低随机误差,优于两点校准 (DieMat)
+
+    计算思路:
+        1. 对每个标准样品,根据阻抗数据计算等效电容
+           C_meas = −Z_IM / (ω·|Z|²)        (正值,容性时 Z_IM<0)
+           G_meas = Z_RE / |Z|²              (电导,反映损耗)
+        2. 已知各标准的 ε'_i (由 paraWater/paraEthanol/paraNaCl/Air 计算)
+        3. 建立线性方程 C_meas = C_0·ε' + C_p,用 np.polyfit 做线性回归
+           → 得到 C_0 (斜率) 和 C_p (截距)
+        4. 对 MUT,计算 C_meas 和 G_meas
+        5. 反演:
+           ε'  = (C_meas − C_p) / C_0
+           ε'' = G_meas / (ω·C_0)
+        6. 电导率 σ = ω·ε_0·ε''  (实数)
+
+    与 DieMat 区别:
+        - DieMat: 固定 Air + Water 两点,ε_water 硬编码 78
+        - DieMatPark: 任意多标准样品,使用线性回归,ε' 按 Debye 模型计算
+          (paraWater/paraEthanol/paraNaCl,随频率变化)
+        - DieMat: 只输出 ε' (隐含在 EpsRE)
+        - DieMatPark: 同时输出 ε' 和 ε'' (完整复介电常数)
+
+    参数:
+        refdata (list[DataFrame]): N 个标准样品的阻抗数据 (N≥2)
+            每条含 'FREQ[Hz]','Rs[ohm]','X[ohm]'
+        prodata (list[DataFrame]): M 个待测 MUT 阻抗数据
+        params_info (dict): 需含
+            - 'solution_parameters' (list[dict]): 长度 N,每个含
+                - 'solution_index' (int): refdata 索引
+                - 'name' (str): 'Air' / 'Water' / 'Ethanol' / 'Alcohol' / 'NaCl'
+                - 'temperature' (float, °C)
+                - 'concentration' (float, mol/L, NaCl 时使用)
+
+    返回:
+        list[DataFrame]: M 条 MUT 复介电常数,字段
+            'FREQ[Hz]','EpsRE[-]','EpsIM[-]','SigmaRE[S/m]','SigmaIM[S/m]'
+        注:遵循 ε* = ε' − jε'' 约定,因此 EpsIM = −ε'' (负值代表损耗)
+
+    限制:
+        - 当前实现每个频率点独立校准 (C_0(ω), C_p(ω) 随频率变化),
+          不强制要求不同频率共用同一组 C_0, C_p。
+        - 与文档"宽频测量中不应简单混合所有频率"的原则一致。
+    """
+    # 从 params_info 获取标准样品信息
+    solution_params = params_info['solution_parameters']
+    n_standards = len(solution_params)
+
+    if n_standards < 2:
+        raise ValueError(
+            f"DieMatPark 需要至少 2 个标准样品,当前 n_standards={n_standards}"
+        )
+
+    # 统一以 prodata[0] 频率为计算基准
+    if 'FREQ[Hz]' not in prodata[0].columns:
+        raise ValueError("prodata[0] must contain 'FREQ[Hz]' column")
+    freq = array(prodata[0]['FREQ[Hz]'])
+    omega = 2 * pi * freq
+
+    ################## 步骤 1: 收集所有标准样品的 C_meas 和 ε' 已知值 ##################
+    C_meas_list = []
+    eps_known_list = []
+
+    for sol_info in solution_params:
+        sol_idx = sol_info['solution_index']
+        ref_freq = array(refdata[sol_idx]['FREQ[Hz]'])
+        ref_omega = array(list(2 * pi * ref_freq))
+
+        ZRE = array(refdata[sol_idx]['Rs[ohm]'])
+        ZIM = array(refdata[sol_idx]['X[ohm]'])
+        Z_abs2 = ZRE**2 + ZIM**2
+
+        # 物理公式 (来自基于阻抗谱的复介电参数测量方法.md §13):
+        #   C_meas = -Z_IM / (ω · (Z_RE² + Z_IM²))
+        # 容性时 Z_IM<0, 因此 C_meas > 0
+        C_meas = -ZIM / (ref_omega * Z_abs2)
+
+        # 获取标准样品的已知 ε' (实部)
+        name = sol_info['name']
+        temperature = float(sol_info.get('temperature', 25.0))
+        concentration = float(sol_info.get('concentration', 0.0))
+
+        if name == 'Air':
+            eps_known = np.ones_like(ref_omega)
+        elif name == 'Water':
+            eps_water, _ = paraWater(ref_omega)
+            eps_known = real(eps_water)
+        elif name in ('Ethanol', 'Alcohol'):
+            eps_eth, _ = paraEthanol(ref_omega)
+            eps_known = real(eps_eth)
+        elif name == 'NaCl':
+            eps_nacl, _ = paraNaCl(ref_omega, temperature, concentration)
+            eps_known = real(eps_nacl)
+        else:
+            raise ValueError(
+                f"DieMatPark: 未知标准样品类型 '{name}',"
+                f"支持: Air / Water / Ethanol / Alcohol / NaCl"
+            )
+
+        C_meas_list.append(C_meas)
+        eps_known_list.append(eps_known)
+
+    ################## 步骤 2-3: 线性回归 C_meas = C_0·ε' + C_p ##################
+    # 合并所有标准的 (ε', C_meas) 数据
+    C_meas_all = np.concatenate(C_meas_list)
+    eps_known_all = np.concatenate(eps_known_list)
+
+    # np.polyfit(x, y, 1) 返回 [斜率, 截距]
+    # 即 C_0 (斜率) 和 C_p (截距)
+    C0_coeffs = np.polyfit(eps_known_all, C_meas_all, 1)
+    C0 = C0_coeffs[0]   # 斜率 = C_0
+    Cp = C0_coeffs[1]   # 截距 = C_p
+
+    ################## 步骤 4-6: 对 MUT 计算 ε' 和 ε'' ##################
+    resultsdata = list()
+    for temp in range(0, len(prodata)):
+        Freq = prodata[temp]['FREQ[Hz]']
+        ZRE_measrued = array(prodata[temp]['Rs[ohm]'])
+        ZIM_measrued = array(prodata[temp]['X[ohm]'])
+        Z_abs2_meas = ZRE_measrued**2 + ZIM_measrued**2
+
+        # 防御: 防止 |Z|² = 0 导致除零
+        with np.errstate(divide='ignore', invalid='ignore'):
+            C_meas = np.where(
+                Z_abs2_meas < 1e-30,
+                np.inf,
+                -ZIM_measrued / (omega * Z_abs2_meas)
+            )
+            G_meas = np.where(
+                Z_abs2_meas < 1e-30,
+                np.inf,
+                ZRE_measrued / Z_abs2_meas
+            )
+
+        # 介电常数实部 ε'
+        epsMUT_re = (C_meas - Cp) / C0
+
+        # 介电常数虚部 ε'' (正值,代表损耗)
+        epsMUT_im = G_meas / (omega * C0)
+
+        # 复介电常数 ε* = ε' − jε''  (与 threesolutions 一致)
+        epsMUT = epsMUT_re - 1j * epsMUT_im
+
+        # 电导率 σ = jωε_0·ε* = ωε_0·ε'' + jωε_0·ε'
+        # SigmaRE = ω·ε_0·ε''  (电导率实部,正)
+        # SigmaIM = ω·ε_0·ε'   (电极化电流贡献,正)
+        sigmaMUT = 1j * omega * epsMUT * eps0
+
+        resu = creatdatabaseEPS(Freq, epsMUT, sigmaMUT)
+        resultsdata.append(resu)
+
+    print('DieMatPark Processed')  # 输出到状态栏
+    # 同时打印校准结果,便于调试
+    print(f'  [DieMatPark] C_0 = {C0:.4e} F, C_p = {Cp:.4e} F '
+          f'(n_standards={n_standards}, n_freq={len(freq)})')
+    return resultsdata
 
 
 
