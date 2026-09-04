@@ -452,6 +452,7 @@ class ProcessingMethodUIs:
         # 适用:低/中频段 (f < 1 GHz) + 已知参考液 (NaCl/Water/Ethanol/Air)。
         from PySide6.QtWidgets import QLabel
         self.tlcal_note = QLabel(
+            "ℹ RF Impedance Calibration: uses a reference solution and the transmission-line model to back-solve cable parameters γCable and de-embed, recovering the sample's port impedance Z_mut.\n"
             "⚠ RF Impedance Calibration applicability: f < 1 GHz, known reference solution required\n"
             "   At higher frequencies (f ≥ 1 GHz) γ·l saturates and tanh/arctanh become numerically unstable; "
             "the recovered Z_mut will be marked NaN. Use TLcalculateEIS (forward) for verification."
@@ -568,6 +569,7 @@ class ProcessingMethodUIs:
         # 限制:依赖校准结果,高频段 (γl 饱和) 输入 Z 失效,需在该频段使用其他方法。
         from PySide6.QtWidgets import QLabel
         self.tlcaldiel_note = QLabel(
+            "ℹ RF Dielectric Calculation: inverse transmission-line problem — given the calibrated Z(ω), solve for the sample's complex permittivity ε(ω).\n"
             "⚠ RF Dielectric Calculation applicability: requires prior TLcalibrate (Open/NaCl reference)\n"
             "   Inverse problem: Z(ω) → ε(ω) via mpmath.findroot, with dual-initial-guess "
             "(ε=30 + ε_paraplate) for robust convergence on extreme samples.\n"
@@ -685,6 +687,7 @@ class ProcessingMethodUIs:
         # 主要用于材料模型验证、合成数据生成、或拟合流程中的正演模型。
         from PySide6.QtWidgets import QLabel
         self.tleis_note = QLabel(
+            "ℹ RF Impedance Calculation: forward transmission-line model — given the sample's complex permittivity ε(ω), compute the port impedance Z(ω).\n"
             "⚠ RF Impedance Calculation applicability: prodata must contain EpsRE/EpsIM (dielectric spectrum)\n"
             "   Forward model: Z(ω) = (η/Gf) / tanh(γ·ls) with γ = jω√(με). "
             "Pair with RF Dielectric Calculation (inverse) for ε → Z → ε consistency checks."

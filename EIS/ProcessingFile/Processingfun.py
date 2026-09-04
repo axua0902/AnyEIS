@@ -1077,22 +1077,49 @@ def TLcalculateEIS(prodata, params_info):
     eps0 = 8.854187817e-12    # 真空介电常数
 
     resultsdata=list()
-    
+
     processing_params = params_info['processing_parameters']    # 从params_info获取处理参数
-    
+
     # 将字符串参数转换为float
     Gf1 = float(processing_params['geometric_constant'])  # 3.95
     ls = float(processing_params['solution_length'])  # 0.00255 测量段长度
+
+    # 列名兜底查找:与 check5 保持一致的 DS 介电列别名
+    EPSRE_ALIASES = [
+        'EpsRE[-]', 'epsRE[-]', 'EPS RE[-]', 'EPSRE',
+        'PERMITTIVITY RE', 'EPSILON RE', 'EPS RE',
+        'PERMITTIVITYRE', 'EPSILONRE',
+    ]
+    EPSIM_ALIASES = [
+        'EpsIM[-]', 'epsIM[-]', 'EPS IM[-]', 'EPSIM',
+        'PERMITTIVITY IM', 'EPSILON IM', 'EPS IM',
+        'PERMITTIVITYIM', 'EPSILONIM',
+    ]
+
+    def _resolve_col(df, aliases, kind):
+        """Return the actual column name in df matching one of aliases (case-insensitive),
+        or raise KeyError with a clear message listing what was tried."""
+        cols_lower = {str(c).strip().lower(): c for c in df.columns}
+        for a in aliases:
+            hit = cols_lower.get(a.lower())
+            if hit is not None:
+                return hit
+        raise KeyError(
+            f"TLcalculateEIS: none of the {kind} column aliases were found. "
+            f"Tried: {aliases}. Available columns: {list(df.columns)}"
+        )
 
     # 处理每个测试样品数据
     SolZThe = [0 for i in range(0, len(prodata))]
     for temp in range(0, len(prodata)):
         freq = prodata[temp]['FREQ[Hz]']
         omega = 2 * pi * freq
-        
-        # 从prodata中读取介电常数数据
-        epsRE = prodata[temp]['EpsRE[-]']
-        epsIM = prodata[temp]['EpsIM[-]']
+
+        # 从prodata中读取介电常数数据(列名兜底)
+        epsRE_col = _resolve_col(prodata[temp], EPSRE_ALIASES, "EpsRE")
+        epsIM_col = _resolve_col(prodata[temp], EPSIM_ALIASES, "EpsIM")
+        epsRE = prodata[temp][epsRE_col]
+        epsIM = prodata[temp][epsIM_col]
         eps = epsRE + 1j*epsIM
         eps = array(eps)
         

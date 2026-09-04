@@ -9,7 +9,7 @@ from EIS.ProcessingFile.ProcessingUI import DataprocessUI#, RefedataUI
 
 from EIS.InputFile.Inputfun import readfile
 from EIS.ProcessingFile.Processingfun import calibrate,paraplate,threesolutions,TLcalibrate,DieMat,TLcalculateEPS,TLcalculateEIS
-from EIS.Other.Datacheck import check1,check2,check3,check4,check5
+from EIS.Other.Datacheck import check1,check2,check3,check4,check5,check6_freq_consistency
 
 # 项目根目录（本文件位于 EIS/ProcessingFile/，向上 3 层即为项目根）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -192,8 +192,8 @@ def check5(data):  #判断数据类型
     }
     
     ds_columns = {
-        'epsRE': ['PERMITTIVITY RE', 'EPSILON RE', 'EPS RE','EPS RE[-]', 'PERMITTIVITYRE', 'EPSILONRE', 'EPSRE', 'epsRE[-]'],
-        'epsIM': ['PERMITTIVITY IM', 'EPSILON IM', 'EPS IM','EPS IM[-]', 'PERMITTIVITYIM', 'EPSILONIM', 'EPSIM', 'epsIM[-]'],
+        'epsRE': ['PERMITTIVITY RE', 'EPSILON RE', 'EPS RE','EPS RE[-]', 'PERMITTIVITYRE', 'EPSILONRE', 'EPSRE', 'epsRE[-]','EpsRE[-]'],
+        'epsIM': ['PERMITTIVITY IM', 'EPSILON IM', 'EPS IM','EPS IM[-]', 'PERMITTIVITYIM', 'EPSILONIM', 'EPSIM', 'epsIM[-]','EpsIM[-]'],
         'sigmaRE': ['CONDUCTIVITY RE', 'SIGMA RE', 'SIG RE','SIGMA RE[S/m]', 'CONDUCTIVITYRE', 'SIGMARE', 'SIGRE', 'sigmaRE[S/m]'],
         'sigmaIM': ['CONDUCTIVITY IM', 'SIGMA IM', 'SIG IM','SIGMA IM[S/m]', 'CONDUCTIVITYIM', 'SIGMAIM', 'SIGIM', 'sigmaIM[S/m]']
     }
