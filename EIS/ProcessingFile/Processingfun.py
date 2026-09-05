@@ -17,6 +17,7 @@ from numpy import real,imag,angle,absolute,pi,log,sqrt,tanh,arctanh,array,abs
 from pandas import DataFrame,Series
 from scipy.optimize import fsolve, root_scalar, brentq
 from EIS.Other.standard_parameter import paraNaCl,paraWater,paraEthanol
+from EIS.Other.Datacheck import resolve_column
 
 
 ##############constant##############
@@ -743,10 +744,29 @@ def TLcalibrate(refdata, prodata, params_info):
     solution_params = params_info['solution_parameters']
     sol_info = solution_params[0]  # NaCl solution
     sol_idx = sol_info['solution_index']
-    
-    Reffreq=refdata[sol_idx]['FREQ[Hz]']
+
+    # [F4+M9 修复] refdata 列名变体支持 + 缺列友好诊断
+    # 与 check5() / Datacheck.resolve_column 保持一致,支持 'Rs[ohm]' / 'RS[OHM]' / 'Rs[Ω]' / 'R' / 'Rs' 等变体
+    FREQ_CANDS = ['FREQ[Hz]']
+    RS_CANDS = ['Rs[ohm]', 'RS[OHM]', 'Rs[Ω]', 'Rs', 'R']
+    X_CANDS = ['X[ohm]', 'X[OHM]', 'X[Ω]', 'X']
+
+    _ref_df = refdata[sol_idx]
+    ref_freq_col = resolve_column(_ref_df, FREQ_CANDS)
+    ref_rs_col = resolve_column(_ref_df, RS_CANDS)
+    ref_x_col = resolve_column(_ref_df, X_CANDS)
+    _missing_ref = []
+    if not ref_freq_col: _missing_ref.append('FREQ')
+    if not ref_rs_col: _missing_ref.append('Rs')
+    if not ref_x_col: _missing_ref.append('X')
+    if _missing_ref:
+        print(f'[TLcalibrate] refdata[{sol_idx}] 缺列 {_missing_ref}; '
+              f'可用列: {list(_ref_df.columns)}; 函数退出')
+        return resultsdata
+
+    Reffreq=_ref_df[ref_freq_col]
     Refomega=array(list(2*pi*Reffreq))
-    
+
     ############################################ 传 输 线 下 溶  液  理  论  阻   抗  #########################
     temperature=float(sol_info['temperature'])  # 25
     concentration=float(sol_info['concentration'])  # 0.1
@@ -755,18 +775,18 @@ def TLcalibrate(refdata, prodata, params_info):
     else:
         print('TLcalibrate: Only NaCl solution is supported')
         return
-    
-    ZREref=refdata[sol_idx]['Rs[ohm]']
-    ZIMref=refdata[sol_idx]['X[ohm]']
+
+    ZREref=_ref_df[ref_rs_col]
+    ZIMref=_ref_df[ref_x_col]
     Zref=ZREref+1.j*ZIMref
     CalZexp=array(Zref)
-    
+
     gammaCalSol=sqrt((msigmaNaCl+1j*Refomega*mu1*mu0)*(1j*Refomega*CalSoleps*eps0))
     etaCalSol=1j*Refomega*mu1*mu0/gammaCalSol#intrinsic impedance
     Z0CalSol=etaCalSol/Gf1
     CalZsol=Z0CalSol/tanh(gammaCalSol*ls)
     ############################################ 传 输 线 下 溶  液  理  论  阻   抗  #########################
-    
+
     ############################## 传输线参数###############################
     # [TP-006 修复] arctanh 参数 |x|>=1 时返回 inf/NaN 导致下游 tanh 计算发散
     # 用 np.clip 限制参数范围在 (-1+1e-10, 1-1e-10),溢出点统一置 NaN
@@ -780,9 +800,24 @@ def TLcalibrate(refdata, prodata, params_info):
 
     SolZThe=[0 for i in range(0,len(prodata))]
     for temp in range(0,len(prodata)):
-        Freq=prodata[temp]['FREQ[Hz]']
-        ZREmeasrued=prodata[temp]['Rs[ohm]']
-        ZIMmeasrued=prodata[temp]['X[ohm]']
+        if prodata[temp] is None or len(prodata[temp]) == 0:
+            continue
+        _pro_df = prodata[temp]
+        pro_freq_col = resolve_column(_pro_df, FREQ_CANDS)
+        pro_rs_col = resolve_column(_pro_df, RS_CANDS)
+        pro_x_col = resolve_column(_pro_df, X_CANDS)
+        _missing_pro = []
+        if not pro_freq_col: _missing_pro.append('FREQ')
+        if not pro_rs_col: _missing_pro.append('Rs')
+        if not pro_x_col: _missing_pro.append('X')
+        if _missing_pro:
+            print(f'[TLcalibrate] prodata[{temp}] 缺列 {_missing_pro}; '
+                  f'可用列: {list(_pro_df.columns)}; 跳过本条数据')
+            continue
+
+        Freq=_pro_df[pro_freq_col]
+        ZREmeasrued=_pro_df[pro_rs_col]
+        ZIMmeasrued=_pro_df[pro_x_col]
         Zmeasrued=ZREmeasrued+1.j*ZIMmeasrued
         Zexptest=array(Zmeasrued)
 

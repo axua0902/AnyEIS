@@ -379,12 +379,28 @@ class Dataprocess(QWidget, DataprocessUI):
 
         elif currentmethod == 'RF Impedance Calibration':  ####基于传输线理论校准电极
             if check3(self.refdata, self.refdataname) == 1 and check5(self.refdata) == 'EIS':
+                # [M10 升级] prodata 必须也是 EIS(阻抗);若 prodata 是 DS 或其他类型,
+                # 弹 QMessageBox 提示用户改用 "RF Dielectric Calculation" 方法。
+                # 检查顺序: refdata (check5 已联检) → prodata (本步) → params → 计算
+                pro_type = check5(self.prodata)
+                if pro_type != 'EIS':
+                    QMessageBox.critical(
+                        self,
+                        'Data type error',
+                        f'RF Impedance Calibration requires EIS (impedance) data.\n\n'
+                        f'Detected prodata type: {pro_type}\n\n'
+                        f'If you have permittivity/conductivity data, '
+                        f'please use "RF Dielectric Calculation" instead.'
+                    )
+                    print(f'[Processing] TLcalibrate requires EIS prodata, '
+                          f'got {pro_type}; user notified via dialog')
+                    return
                 params_info = self.get_parameters_info()  # 获取参数
                 print('params:',params_info)
                 processresults = TLcalibrate(self.refdata, self.prodata, params_info)
                 self.databasecreat(processresults)
             else:
-                print('Reference data error')
+                QMessageBox.warning(self, "Warning", "Reference data error")
                 return
 
         elif currentmethod == 'RF Dielectric Calculation':  ####基于传输线理论计算复介电常数
