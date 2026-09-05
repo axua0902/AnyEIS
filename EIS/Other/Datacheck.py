@@ -360,6 +360,95 @@ def detect_data_type_from_columns(plotdata, message=None):
     return 'UNKNOWN'
 
 
+##################################方法数据要求#############################
+# 集中描述每个方法对数据的要求。
+# 字段:
+#   refdata_types:  list[str]  refdata 必须是其中一种类型
+#   prodata_types:  list[str]  prodata 必须是其中一种类型
+#   freq_consistency: bool     是否需要 ref/prodata 频率一致(触发 check6)
+#   required_params: list[str] 必需的 processing_parameters 字段名
+# 新增方法: 只需在此 dict 加 1 个 entry,无需修改 validate_method_prereq。
+METHOD_DATA_SPECS = {
+    'Parallel Plate Capacitor': {
+        'prodata_types': ['EIS', 'DS'],
+    },
+    'System Calibration': {
+        'refdata_types': ['EIS'],
+    },
+    'Dielectric Material Method': {
+        'refdata_types': ['EIS'],
+        'freq_consistency': True,  # 触发 check6
+    },
+    'Three-Solution Method': {
+        'refdata_types': ['EIS'],
+    },
+    'RF Impedance Calibration': {
+        'refdata_types': ['EIS'],
+        'prodata_types': ['EIS'],
+    },
+    'RF Dielectric Calculation': {
+        'prodata_types': ['EIS'],
+    },
+    'RF Impedance Calculation': {
+        'prodata_types': ['DS'],
+    },
+    'K-K for EIS': {
+        'required_params': ['validation_parameter'],
+    },
+}
+
+
+def validate_method_prereq(method_name, refdata, refdataname, prodata,
+                           params_info=None):
+    """
+    统一校验方法的前置条件,返回 (is_valid, error_messages: list[str])。
+    一次报告所有问题,不再"按一次发现一个"。
+
+    不识别的方法返回 (True, [])(向后兼容:旧代码用 else: return 静默)。
+
+    调用方负责把 errors 列表展示给用户(QMessageBox.warning)。
+    """
+    spec = METHOD_DATA_SPECS.get(method_name)
+    if not spec:
+        return True, []
+    errors = []
+
+    if spec.get('refdata_types'):
+        if check3(refdata, refdataname) != 1:
+            errors.append(
+                f"Reference data count invalid: need 1 valid ref, "
+                f"got {len(refdata)} ({refdataname})"
+            )
+        else:
+            ref_type = check5(refdata)
+            if ref_type not in spec['refdata_types']:
+                errors.append(
+                    f"Reference data type is {ref_type}, "
+                    f"need {spec['refdata_types']}"
+                )
+
+    if spec.get('prodata_types'):
+        pro_type = check5(prodata)
+        if pro_type not in spec['prodata_types']:
+            errors.append(
+                f"Processing data type is {pro_type}, "
+                f"need {spec['prodata_types']}"
+            )
+
+    if spec.get('freq_consistency'):
+        if check6_freq_consistency(prodata, refdata) == 0:
+            errors.append(
+                "Frequency points inconsistent between refdata and prodata"
+            )
+
+    for p in spec.get('required_params', []):
+        val = (params_info or {}).get('processing_parameters', {}).get(p)
+        if not val:
+            errors.append(f"Required parameter missing: {p}")
+
+    return len(errors) == 0, errors
+
+
 ##################################成对化工具#############################
 def ensure_paired_form(selectlist, plotdataname, plotdata, dataInfo=None):
     """

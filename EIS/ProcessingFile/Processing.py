@@ -9,7 +9,7 @@ from EIS.ProcessingFile.ProcessingUI import DataprocessUI#, RefedataUI
 
 from EIS.InputFile.Inputfun import readfile
 from EIS.ProcessingFile.Processingfun import calibrate,paraplate,threesolutions,TLcalibrate,DieMat,TLcalculateEPS,TLcalculateEIS
-from EIS.Other.Datacheck import check1,check2,check3,check4,check5,check6_freq_consistency
+from EIS.Other.Datacheck import check1,check2,check3,check4,check5,check6_freq_consistency,validate_method_prereq
 
 # 项目根目录（本文件位于 EIS/ProcessingFile/，向上 3 层即为项目根）
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -320,129 +320,69 @@ class Dataprocess(QWidget, DataprocessUI):
 
 
     def processing(self):
+        """
+        数据处理 dispatcher。
+
+        [重构后] 8 个方法统一走 validate_method_prereq() 入口校验:
+        - 一次报告所有问题(refdata 类型错、prodata 类型错、频率不一致、缺参数等)
+        - 校验通过后,每个分支只关心业务逻辑,不再嵌 if/else 校验
+        - 不识别的方法静默 return(向后兼容旧 else 分支)
+
+        数据要求集中在 EIS.Other.Datacheck.METHOD_DATA_SPECS。
+        新增方法: 只需在 METHOD_DATA_SPECS 加 1 个 entry + 在此加 1 个业务分支。
+        """
         currentmethod = self.processui.processmethodComboBox.currentText()
-        
-        if currentmethod == 'Parallel Plate Capacitor':  ####计算平行板电容的介电常数
-            if check5(self.prodata) == 'EIS' or check5(self.prodata) == 'DS':
-                params_info = self.get_parameters_info()  # 获取参数
-                Gf = float(params_info['processing_parameters']['geometric_constant'])
-                processresults = paraplate(self.prodata, Gf)           #数据处理
-                self.databasecreat(processresults)                     #结果数据生成
-            else:
-                QMessageBox.warning(self, "Warning", f"Input data is not EIS or DS data")
-                return
 
+        # 统一入口校验(每种方法只调一次)
+        params_info = self.get_parameters_info()
+        is_valid, errors = validate_method_prereq(
+            currentmethod, self.refdata, self.refdataname, self.prodata, params_info
+        )
+        if not is_valid:
+            QMessageBox.warning(
+                self,
+                f"{currentmethod}: Prerequisites not met",
+                "Cannot start processing:\n\n"
+                + "\n".join(f"  • {e}" for e in errors)
+            )
+            return
 
-        elif currentmethod == 'System Calibration':  # open short load校准电极
-            if check3(self.refdata, self.refdataname) == 1 and check5(self.refdata) == 'EIS':
-                params_info = self.get_parameters_info()  # 获取参数
-                print('params:',params_info)
-                processresults = calibrate(self.refdata, self.prodata, params_info)
-                self.databasecreat(processresults)
-            else:
-                QMessageBox.warning(self, "Warning", f"Reference data error")
-                return
+        # 业务逻辑:不再嵌校验
+        if currentmethod == 'Parallel Plate Capacitor':
+            Gf = float(params_info['processing_parameters']['geometric_constant'])
+            processresults = paraplate(self.prodata, Gf)
+            self.databasecreat(processresults)
 
+        elif currentmethod == 'System Calibration':
+            processresults = calibrate(self.refdata, self.prodata, params_info)
+            self.databasecreat(processresults)
 
-        elif currentmethod == 'Dielectric Material Method':  ###使用两种参考溶液计算介电常数
-            if check3(self.refdata, self.refdataname) == 1 and check5(self.refdata) == 'EIS':
-                # [TP-003] 频率一致性预检(refdata vs prodata)
-                # check6 不通过时,直接报错并停止,不允许继续计算
-                if check6_freq_consistency(self.prodata, self.refdata) == 0:
-                    QMessageBox.critical(
-                        self, "Frequency Inconsistency",
-                        "Reference data frequency does not match processing data.\n\n"
-                        "DieMat requires consistent frequency points between "
-                        "refdata and prodata.\n"
-                        "Please reload reference data with the same frequency grid "
-                        "as the processing data."
-                    )
-                    return
-                params_info = self.get_parameters_info()  # 获取参数
-                print('params:',params_info)
-                processresults = DieMat(self.refdata, self.prodata, params_info)
-                self.databasecreat(processresults)
-            else:
-                print('Reference data error')
-                return
+        elif currentmethod == 'Dielectric Material Method':
+            processresults = DieMat(self.refdata, self.prodata, params_info)
+            self.databasecreat(processresults)
 
-        elif currentmethod == 'Three-Solution Method':  ###使用三中参考溶液计算介电常数
-            if check3(self.refdata, self.refdataname) == 1 and check5(self.refdata) == 'EIS':
-                params_info = self.get_parameters_info()  # 获取参数
-                print('params:',params_info)
-                processresults = threesolutions(self.refdata, self.prodata, params_info)
-                self.databasecreat(processresults)
-            else:
-                print('Reference data error')
-                return
+        elif currentmethod == 'Three-Solution Method':
+            processresults = threesolutions(self.refdata, self.prodata, params_info)
+            self.databasecreat(processresults)
 
+        elif currentmethod == 'RF Impedance Calibration':
+            processresults = TLcalibrate(self.refdata, self.prodata, params_info)
+            self.databasecreat(processresults)
 
-        elif currentmethod == 'RF Impedance Calibration':  ####基于传输线理论校准电极
-            if check3(self.refdata, self.refdataname) == 1 and check5(self.refdata) == 'EIS':
-                # [M10 升级] prodata 必须也是 EIS(阻抗);若 prodata 是 DS 或其他类型,
-                # 弹 QMessageBox 提示用户改用 "RF Dielectric Calculation" 方法。
-                # 检查顺序: refdata (check5 已联检) → prodata (本步) → params → 计算
-                pro_type = check5(self.prodata)
-                if pro_type != 'EIS':
-                    QMessageBox.critical(
-                        self,
-                        'Data type error',
-                        f'RF Impedance Calibration requires EIS (impedance) data.\n\n'
-                        f'Detected prodata type: {pro_type}\n\n'
-                        f'If you have permittivity/conductivity data, '
-                        f'please use "RF Dielectric Calculation" instead.'
-                    )
-                    print(f'[Processing] TLcalibrate requires EIS prodata, '
-                          f'got {pro_type}; user notified via dialog')
-                    return
-                params_info = self.get_parameters_info()  # 获取参数
-                print('params:',params_info)
-                processresults = TLcalibrate(self.refdata, self.prodata, params_info)
-                self.databasecreat(processresults)
-            else:
-                QMessageBox.warning(self, "Warning", "Reference data error")
-                return
+        elif currentmethod == 'RF Dielectric Calculation':
+            processresults = TLcalculateEPS(self.prodata, params_info)
+            self.databasecreat(processresults)
 
-        elif currentmethod == 'RF Dielectric Calculation':  ####基于传输线理论计算复介电常数
-            if check5(self.prodata) == 'EIS':
-                params_info = self.get_parameters_info()  # 获取参数
-                print('params:',params_info)
-                processresults = TLcalculateEPS(self.prodata, params_info)
-                self.databasecreat(processresults)
-            else:
-                print('Reference data error')
-                return
-
-
-        elif currentmethod == 'RF Impedance Calculation':  ####基于传输线理计算阻抗
-            if check5(self.prodata) == 'DS':
-                params_info = self.get_parameters_info()  # 获取参数
-                print('params:',params_info)
-                processresults = TLcalculateEIS(self.prodata, params_info)
-                self.databasecreat(processresults)
-            else:
-                print('Reference data error')
-                return
-
-
-
-
-
-
+        elif currentmethod == 'RF Impedance Calculation':
+            processresults = TLcalculateEIS(self.prodata, params_info)
+            self.databasecreat(processresults)
 
         elif currentmethod == 'K-K for EIS':
-            parameters_info = self.get_parameters_info()  # 获取参数
-            validation_param = parameters_info['processing_parameters']['validation_parameter']
-            if validation_param:
-                Gf = float(validation_param)
-                processresults = paraplate(self.prodata, Gf)
-                self.databasecreat(processresults)
-            else:
-                QMessageBox.warning(self, "Warning", "Validation parameter is required for K-K for EIS method")
-                return
-        else:
-            return
-        return
+            Gf = float(params_info['processing_parameters']['validation_parameter'])
+            processresults = paraplate(self.prodata, Gf)
+            self.databasecreat(processresults)
+
+        # 不识别的方法:静默 return(向后兼容)
   
     ###############################处理#############################
 
