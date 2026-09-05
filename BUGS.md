@@ -11,6 +11,7 @@
 | 轮次 | 日期 | 范围 | 状态 | 摘要 |
 |---|---|---|---|---|
 | **#R1** | 2026-09-03 | `DieMat` 函数 | ✅ **已归档** | 6 个问题分类处置（5 修复 + 1 不修复） |
+| **#R2** | 2026-09-04 | RF 系列 + UI 联动 | ✅ **已归档** | 4 个问题（4 修复） |
 | Bug #001-003 | 历史 | Filter/Processing | ✅ 已处理 | 见下文章节 |
 
 ### R1 归档摘要（DieMat 函数审查）
@@ -47,6 +48,34 @@
 - 未使用变量 → 不影响功能
 
 **未决问题**：无。R1 审查的所有 6 个问题均已决策（修复或不修复）。
+
+---
+
+### R2 归档摘要（RF 系列 + UI 联动）
+
+**审查范围**：[`EIS/ProcessingFile/Processingfun.py`](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processingfun.py) `TLcalculateEIS` + [`EIS/ProcessingFile/Processing.py`](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processing.py) import 块 + [`EIS/ProcessingFile/ProcessingMethodUIs.py`](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py) 三方法 note + `ui_ThreeSolution` / `ui_TransmissionLine`
+
+**问题清单与处置**：
+
+| ID | 标题 | 严重度 | 处置 | 关键改动 |
+|---|---|---|---|---|
+| [TP-014](#tp-014--check6_freq_consistency-未导入-nameerror严重----已修复) | `check6_freq_consistency` 未导入 | 🔴 严重 | ✅ **已修复** | `Processing.py` 补 import |
+| [TP-015](#tp-015--tlcalculateeis-列名硬编码-keyerror中等----已修复) | `TLcalculateEIS` 列名硬编码 | 🟡 中等 | ✅ **已修复** | 加 `_resolve_col` 兜底 |
+| [TP-017](#tp-017--rf-三方法-note-缺少功能说明轻微----已补充) | RF 三方法 note 缺功能说明 | 🟢 轻微 | ✅ **已补充** | 每条加 `ℹ` 行 |
+| [TP-018](#tp-018--three-solution--transmission-line-浓度未联动-ref-液类型中等----已修复) | 浓度未联动 ref 液类型 | 🟡 中等 | ✅ **已修复** | 新增 `_apply_ref_solution_rules` |
+
+**核心成果**：
+1. `TLcalculateEIS` 列名兜底：接受 `check5` 已识别的 9 种 DS 介电列别名 ✅
+2. DieMat UI 预检链路完整：`check6_freq_consistency` 在 [TP-003](#tp-003--diemat-频率取自-refdata0-而非-prodata0-中等----已完整修复) 已存在但未导入,本次补齐 ✅
+3. RF 三方法 note 增加方法功能说明,便于用户辨识正/反问题 ✅
+4. `ui_ThreeSolution` / `ui_TransmissionLine` 浓度输入框与 ref 液类型联动,Water 禁用、Ethanol 切 vol% ✅
+
+**测试覆盖**：
+- 修复后运行 "RF Impedance Calculation"(DS 数据,列名 `EPS RE`/`EPS IM`)→ ✅ 不再 KeyError
+- 修复后运行 "Three-Solution Method" + 切到 Ethanol → ✅ 浓度单位自动变 `vol%`
+- 修复后切到 Water → ✅ 浓度输入框灰显、内容 `0`
+
+**未决问题**：无。R2 审查的 4 个问题均已修复。
 
 ---
 
@@ -1039,6 +1068,10 @@ $$\Rightarrow\quad \frac{1}{G_f Z} = \sigma_\text{dc} + j\omega\varepsilon\varep
 | **TP-006** | `TLcalibrate` | 🟡 中等 | 大 γ·l 下 `tanh`/`arctanh` 数值不稳 | ✅ **已修复**（方案 A — np.clip + NaN 哨兵，2026-09-02） |
 | **TP-007** | `TLcalculateEPS` | 🟡 中等 | 单点实数初值 30 极端样品不收敛 | ✅ **已应用双初值修复**（Air: 0% → 98%, NaCl: 80% → 92%）|
 | **TP-008** | `paraplate` | 🟡 轻微 | σ 公式"缺 σ_dc"实为对公式的误读；公式严格正确 | ✅ **公式确认正确**（仅需文档化适用边界）|
+| **TP-014** | `check6_freq_consistency` 导入 | 🔴 严重 | [TP-003](#tp-003--diemat-频率取自-refdata0-而非-prodata0-中等----已完整修复) 修复时未导入 → NameError | ✅ **已修复**（2026-09-04,补 import） |
+| **TP-015** | `TLcalculateEIS` | 🟡 中等 | 硬编码列名 `'EpsRE[-]'`,与 `check5` 9 种别名契约不一致 | ✅ **已修复**（2026-09-04,加 `_resolve_col` 兜底） |
+| **TP-017** | RF 三方法 note | 🟢 轻微 | 缺方法功能说明,仅罗列警告 | ✅ **已补充**（2026-09-04,每条加 `ℹ` 行） |
+| **TP-018** | `ui_ThreeSolution` / `ui_TransmissionLine` | 🟡 中等 | 浓度输入框未联动 ref 液类型,Water/Ethanol 单位错误 | ✅ **已修复**（2026-09-04,`_apply_ref_solution_rules`） |
 
 ---
 
@@ -1533,3 +1566,228 @@ eps_im_MUT = np.where(
 | [TP-016](#tp-016--diemat-新增-ε-显式输出轻微----新增功能) | **新增 ε'' 显式输出** | 🟢 新增功能 | ✅ 已实现 (2026-09-03) | EpsIM=100%err → 0%err |
 
 **R1 审查结论**：所有 6 个问题均已决策（5 修复/解决 + 1 不修复）。无未决问题。
+
+---
+
+## TP-014 — `check6_freq_consistency` 未导入 `Processing.py`（严重） — ✅ 已修复
+
+### 1. 现象
+
+Dielectric Material Method 点击 Process 时,直接 `NameError: name 'check6_freq_consistency' is not defined`,调用栈：
+
+```
+File "Processing.py", line 351, in processing
+    if check6_freq_consistency(self.prodata, self.refdata) == 0:
+NameError: name 'check6_freq_consistency' is not defined
+```
+
+### 2. 根因分析
+
+[TP-003](#tp-003--diemat-频率取自-refdata0-而非-prodata0-中等----已完整修复) 已在 [Datacheck.py#L224-L275](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/Other/Datacheck.py#L224-L275) 实现 `check6_freq_consistency`,并在 [Processing.py#L351](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processing.py#L351) 调用,但 [Processing.py#L12](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processing.py#L12) 的 `from EIS.Other.Datacheck import ...` **未把 `check6_freq_consistency` 加进去**,导致调用时该名称未绑定。
+
+是 TP-003 修复时的漏掉,本次补齐。
+
+### 3. 修复
+
+[Processing.py#L12](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processing.py#L12)：
+
+```python
+# 修改前
+from EIS.Other.Datacheck import check1,check2,check3,check4,check5
+
+# 修改后
+from EIS.Other.Datacheck import check1,check2,check3,check4,check5,check6_freq_consistency
+```
+
+### 4. 状态
+
+✅ **已修复**（2026-09-04）
+
+---
+
+## TP-015 — `TLcalculateEIS` 列名硬编码 `KeyError`（中等） — ✅ 已修复
+
+### 1. 现象
+
+RF Impedance Calculation 接收 DS 数据后,报：
+
+```
+KeyError: 'EpsRE[-]'
+File "Processingfun.py", line 1094, in TLcalculateEIS
+    epsRE = prodata[temp]['EpsRE[-]']
+```
+
+### 2. 根因分析
+
+`TLcalculateEIS` 硬编码读取 `'EpsRE[-]'` / `'EpsIM[-]'`,但 [Datacheck.py#L194-L199](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/Other/Datacheck.py#L194-L199) 的 `check5` 实际接受 **9 种** DS 介电列别名：
+
+```python
+'epsRE': ['PERMITTIVITY RE', 'EPSILON RE', 'EPS RE','EPS RE[-]',
+          'PERMITTIVITYRE', 'EPSILONRE', 'EPSRE', 'epsRE[-]']
+```
+
+`check5` 通过 → 进入 `TLcalculateEIS` → 列名不匹配 → `KeyError`。**上游接受、下游不接受的契约不一致**。
+
+### 3. 修复
+
+在 [Processingfun.py#L1086-L1116](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/Processingfun.py#L1086-L1116) 新增列名兜底查找 `_resolve_col(df, aliases, kind)`：
+
+- 大小写不敏感地在 `df.columns` 中匹配第一个存在的别名
+- 失败时抛 `KeyError` 并附带"已尝试列表 + 实际可用列名",便于排查
+- 覆盖所有 `check5` 已识别的别名（9 种 + 同名 `IM`）
+
+```python
+EPSRE_ALIASES = ['EpsRE[-]', 'epsRE[-]', 'EPS RE[-]', 'EPSRE',
+                 'PERMITTIVITY RE', 'EPSILON RE', 'EPS RE',
+                 'PERMITTIVITYRE', 'EPSILONRE']
+# ... EPSIM_ALIASES 同理
+
+def _resolve_col(df, aliases, kind):
+    cols_lower = {str(c).strip().lower(): c for c in df.columns}
+    for a in aliases:
+        hit = cols_lower.get(a.lower())
+        if hit is not None:
+            return hit
+    raise KeyError(
+        f"TLcalculateEIS: none of the {kind} column aliases were found. "
+        f"Tried: {aliases}. Available columns: {list(df.columns)}"
+    )
+```
+
+调用处：
+
+```python
+epsRE_col = _resolve_col(prodata[temp], EPSRE_ALIASES, "EpsRE")
+epsIM_col = _resolve_col(prodata[temp], EPSIM_ALIASES, "EpsIM")
+epsRE = prodata[temp][epsRE_col]
+epsIM = prodata[temp][epsIM_col]
+```
+
+### 4. 验证
+
+- 修复前：DS 数据列名为 `EPS RE` → `KeyError: 'EpsRE[-]'`
+- 修复后：DS 数据列名为 `EPS RE` → 命中 `EPS RE` → 正常计算
+
+### 5. 状态
+
+✅ **已修复**（2026-09-04）
+
+---
+
+## TP-017 — RF 三方法 note 缺少功能说明（轻微） — ✅ 已补充
+
+### 1. 现象
+
+`ui_TransmissionLine` / `ui_TransmissionLine_cal` / `ui_TransmissionLine_EIScal` 三个方法 note 仅以 `⚠` 开头罗列"适用条件/数值稳定性",**没有先说该方法做什么**。由于三方法名相似（"RF Impedance Calibration" / "RF Dielectric Calculation" / "RF Impedance Calculation"）,用户在切换时无法快速判断哪个是"用 Z 反推 ε"、哪个是"用 ε 正算 Z"。
+
+### 2. 修复
+
+在 [ProcessingMethodUIs.py](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py) 三处 `QLabel` 字符串首行增加一行 `ℹ` 功能说明：
+
+| 方法 | 标签 | 新增 ℹ 行（英文） |
+|---|---|---|
+| RF Impedance Calibration (TLcalibrate) | [L454](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L454) `tlcal_note` | uses a reference solution and the transmission-line model to back-solve cable parameters γCable and de-embed, recovering the sample's port impedance Z_mut. |
+| RF Dielectric Calculation (TLcalculateEPS) | [L570](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L570) `tlcaldiel_note` | inverse transmission-line problem — given the calibrated Z(ω), solve for the sample's complex permittivity ε(ω). |
+| RF Impedance Calculation (TLcalculateEIS) | [L688](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L688) `tleis_note` | forward transmission-line model — given the sample's complex permittivity ε(ω), compute the port impedance Z(ω). |
+
+`ℹ` 与 `⚠` 视觉区分明显（黄色警告块不变,ℹ 行只是多了一行说明）。
+
+### 3. 状态
+
+✅ **已补充**（2026-09-04）
+
+---
+
+## TP-018 — Three-Solution / Transmission Line 浓度未联动 ref 液类型（中等） — ✅ 已修复
+
+### 1. 现象
+
+在 `ui_ThreeSolution` / `ui_TransmissionLine` 选中三种参考液（NaCl / Water / Ethanol）后,**浓度输入框始终可写、单位始终是 `mol/L`**。但：
+
+- **Water** 是纯物质,无浓度概念 → 应禁用并写 `0`
+- **Ethanol** 用体积分数 (vol%) 描述浓度 → 单位应切到 `vol%`
+- **NaCl** 用 mol/L → 默认即可
+
+UI 现状与各 ref 液的物理意义不符,用户可任意填值,易引发"配错浓度单位"导致的隐式错误（计算静默继续,结果失真但不报错）。
+
+### 2. 根因分析
+
+[ProcessingUI.py#L389-L441](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingUI.py#L389-L441) `uiUnit` 创建 ref 液槽时只设了默认 `mol/L` 和默认文本 `0.1`,**没有 connect `currentIndexChanged` 信号**。`ui_ThreeSolution` / `ui_TransmissionLine` 调 `uiUnit` 后也不做联动。
+
+注：[ProcessingMethodUIs.py#L207-L230](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L207-L230) 的 `ui_DielectricMaterial` 已有"全灰显"模式（因为固定 Air+Water,无选择空间）,但 `ui_ThreeSolution` / `ui_TransmissionLine` 仍可切换 ref 液,联动逻辑缺失。
+
+### 3. 修复
+
+在 [ProcessingMethodUIs.py#L255](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L255) 新增辅助方法 `_apply_ref_solution_rules(num)`：
+
+```python
+def _apply_ref_solution_rules(self, num):
+    """根据 refsoluionComboBox[num] 选择,自动调整浓度输入框状态和单位。
+    规则:
+        Water  : 浓度禁用 + 写 0,单位 mol/L
+        Ethanol: 浓度启用,单位 vol%
+        其他   : 浓度启用,单位 mol/L
+    """
+    if num not in self.parent.refsoluionComboBox:
+        return
+    sol = self.parent.refsoluionComboBox[num].currentText().strip()
+    conc_edit = self.parent.concentrationTextEdit.get(num)
+    conc_label = self.parent.concentrationLineEdit.get(num)
+    conc_unit = self.parent.concentrationUnitLineEdit.get(num)
+    if sol == 'Water':
+        if conc_edit is not None: conc_edit.setText('0'); conc_edit.setEnabled(False)
+        if conc_label is not None: conc_label.setEnabled(False)
+        if conc_unit is not None: conc_unit.setEnabled(False); conc_unit.setText('mol/L')
+    elif sol == 'Ethanol':
+        if conc_edit is not None: conc_edit.setEnabled(True)
+        if conc_label is not None: conc_label.setEnabled(True)
+        if conc_unit is not None: conc_unit.setEnabled(True); conc_unit.setText('vol%')
+    else:  # NaCl 等
+        if conc_edit is not None: conc_edit.setEnabled(True)
+        if conc_label is not None: conc_label.setEnabled(True)
+        if conc_unit is not None: conc_unit.setEnabled(True); conc_unit.setText('mol/L')
+```
+
+在 [ProcessingMethodUIs.py#L307-L315](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L307-L315) `ui_ThreeSolution` 和 [L355-L361](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ProcessingFile/ProcessingMethodUIs.py#L355-L361) `ui_TransmissionLine` 中 connect 信号 + 立即应用一次：
+
+```python
+# ui_ThreeSolution (3 个槽)
+for i in range(3):
+    if i in self.parent.refsoluionComboBox:
+        self.parent.refsoluionComboBox[i].currentIndexChanged.connect(
+            lambda _idx, n=i: self._apply_ref_solution_rules(n)
+        )
+        self._apply_ref_solution_rules(i)  # 初始应用
+
+# ui_TransmissionLine (1 个槽)
+if 0 in self.parent.refsoluionComboBox:
+    self.parent.refsoluionComboBox[0].currentIndexChanged.connect(
+        lambda _idx, n=0: self._apply_ref_solution_rules(n)
+    )
+    self._apply_ref_solution_rules(0)
+```
+
+使用 `lambda _idx, n=i: ...` 闭包锁定 `num`,避免 for 循环变量捕获问题。
+
+### 4. 行为表
+
+| 选中 | 浓度输入框 | 单位标签 |
+|---|---|---|
+| `Water` | 禁用 + 文本 `0` | 禁用 `mol/L` |
+| `Ethanol` | 启用 | 启用 `vol%` |
+| `NaCl` | 启用 | 启用 `mol/L` |
+| `Air` | 启用 | 启用 `mol/L` |
+
+注：`ui_TransmissionLine_cal` / `ui_TransmissionLine_EIScal` 不调用 `uiUnit`,不涉及 ref 液下拉,故未改动。
+
+### 5. 验证
+
+- 启动 AnyEIS → Processing → Method 选 `Three-Solution Method`
+  - 三个 ref 液下拉框中,每个默认 NaCl → 浓度可写、`mol/L` ✅
+  - 切到 Water → 浓度输入框灰显、内容变 `0` ✅
+  - 切到 Ethanol → 浓度输入框恢复可写、单位变 `vol%` ✅
+- Method 切到 `RF Impedance Calibration` → 同样行为 ✅
+
+### 6. 状态
+
+✅ **已修复**（2026-09-04）

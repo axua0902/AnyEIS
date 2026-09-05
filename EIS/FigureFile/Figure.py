@@ -17,6 +17,7 @@ from EIS.FigureFile.ui_Figure import FigureUI
 from EIS.FigureFile.Figurefun import creatanyfile,writeanydata,EISfiguremaker,EPSfiguremaker
 from EIS.FigureFile.OtherFigurefun import TIMEfiguremaker,Generalfiguremaker
 from EIS.FigureFile.UserDefineFun import userdefine1, userdefine2, userdefine3, userdefine4, userdefine5
+from EIS.Other.Datacheck import detect_data_type_from_columns
 from setting import Settings
 
 
@@ -121,6 +122,11 @@ class FigWidget(QWidget ,FigureUI):
         self.figuregui.origindataCheckBox.stateChanged.connect(self._on_processing_state_changed)
         self.figuregui.processeddataCheckBox.stateChanged.connect(self._on_processing_state_changed)
 
+        # Original/Processed 互斥(仅响应用户点击):点击一方启用时,自动取消另一方
+        # clicked 信号只对用户点击触发,setChecked() 不会触发,可避免与 stateChanged 互相递归
+        self.figuregui.origindataCheckBox.clicked.connect(self._on_orig_checkbox_clicked)
+        self.figuregui.processeddataCheckBox.clicked.connect(self._on_proc_checkbox_clicked)
+
         self.figuregui.userdefine1btn.clicked.connect(lambda: userdefine1(self))
         self.figuregui.userdefine2btn.clicked.connect(lambda: userdefine2(self))
         self.figuregui.userdefine3btn.clicked.connect(lambda: userdefine3(self))
@@ -139,6 +145,11 @@ class FigWidget(QWidget ,FigureUI):
         # 默认:绘图时显示 synthetic 数据(Filter/Processing/Fitting 行为)
         # Plotting 页面会通过 set_processing_state_enabled(False) 同步关闭它
         self._display_synthetic = True
+
+        # Original/Processed 复选框互斥(默认关闭,Processing 页面启用)
+        # Process 启用时数据可能改变类型 (EIS → DS),需强制单选以匹配图表类型
+        # Filter / Fitting 页面数据不变类型,允许两者同时勾选用于对比
+        self._mutual_exclusion_enabled = False
 
     def set_processing_state_enabled(self, enabled):
         """
@@ -164,15 +175,81 @@ class FigWidget(QWidget ,FigureUI):
         """
         self._display_synthetic = enabled
 
+    def set_mutual_exclusion_enabled(self, enabled):
+        """
+        控制 Original / Processed 复选框的互斥规则。
+        由页面控制器在 processCheckBox 状态变化时调用:
+        - True  (Process 模块激活): 数据可能改变类型 (EIS → DS),
+                Original/Processed 至多勾选一个;
+                若当前两者都勾选则取消 Original (保留 Processed,与图表类型一致)
+        - False (Filter / Fitting 页面): 数据类型不变,允许两者同时勾选用于对比
+        """
+        self._mutual_exclusion_enabled = bool(enabled)
+        if enabled:
+            if (self.figuregui.origindataCheckBox.isChecked() and
+                    self.figuregui.processeddataCheckBox.isChecked()):
+                # 启用互斥时若两者都勾选,强制单选 (Processed 优先,与图表类型一致)
+                # 注意:此处不要 blockSignals — setChecked 触发的 stateChanged
+                # 会驱动 _on_processing_state_changed 按新状态重绘画布,
+                # 这是一次必要重绘(block 掉会导致画布停留在旧状态)
+                self.figuregui.origindataCheckBox.setChecked(False)
+                print('[Figure] mutual exclusion ON; Original unchecked, Processed kept')
+
     def _on_processing_state_changed(self):
         """
-        Original/Processed 复选框状态变化时的槽函数:
-        - Filter/Processing/Fitting 模式下:立即重绘图窗以反映新选择
+        Original/Processed 复选框 stateChanged 槽:
+        - Filter/Processing/Fitting 模式下:重新评估 datatype ComboBox 以匹配当前可见数据,然后重绘
         - Input/Simulation 模式下:复选框被禁用,此槽不会被触发
+
+        当互斥模式 (mutual exclusion) 启用时,"两者同时勾选"是用户点击时的瞬时态
+        (click handler 随后会调整为单选),此处跳过重绘,避免用错位数据画一次错图;
+        click handler 会以最终单选状态再触发重绘。
         """
-        if getattr(self, '_processing_state_enabled', True) and self.plotdata:
-            # 已有数据才重绘(避免初始化时的空重绘)
-            self.drawfigure()
+        if not getattr(self, '_processing_state_enabled', True) or not self.plotdata:
+            return
+        if (self._mutual_exclusion_enabled and
+                self.figuregui.origindataCheckBox.isChecked() and
+                self.figuregui.processeddataCheckBox.isChecked()):
+            # 互斥模式下的瞬时态:两者同时勾选。click handler 即将调整,稍后由它重绘
+            return
+        self._auto_set_datatype_combobox()
+        # 已有数据才重绘(避免初始化时的空重绘)
+        self.drawfigure()
+
+    def _on_orig_checkbox_clicked(self, checked):
+        """
+        用户点击 Original 复选框后的互斥处理(仅在 mutual_exclusion 启用时生效):
+        - 若用户刚启用 Original 且 Processed 也被勾选 → 取消 Processed
+        - Processed 的 stateChanged 通过 blockSignals 抑制,避免递归触发 _on_processing_state_changed
+        - 调整后主动重绘一次(以"仅 Original 可见"的最终状态)
+        """
+        if not self._mutual_exclusion_enabled:
+            return
+        if checked and self.figuregui.processeddataCheckBox.isChecked():
+            self.figuregui.processeddataCheckBox.blockSignals(True)
+            try:
+                self.figuregui.processeddataCheckBox.setChecked(False)
+            finally:
+                self.figuregui.processeddataCheckBox.blockSignals(False)
+            # blockSignals 抑制了 Processed 的 stateChanged → 不会自动重绘
+            # 手动触发一次,以最终单选状态重绘
+            if getattr(self, '_processing_state_enabled', True) and self.plotdata:
+                self._auto_set_datatype_combobox()
+                self.drawfigure()
+
+    def _on_proc_checkbox_clicked(self, checked):
+        """用户点击 Processed 复选框后的互斥处理(对偶于 _on_orig_checkbox_clicked)"""
+        if not self._mutual_exclusion_enabled:
+            return
+        if checked and self.figuregui.origindataCheckBox.isChecked():
+            self.figuregui.origindataCheckBox.blockSignals(True)
+            try:
+                self.figuregui.origindataCheckBox.setChecked(False)
+            finally:
+                self.figuregui.origindataCheckBox.blockSignals(False)
+            if getattr(self, '_processing_state_enabled', True) and self.plotdata:
+                self._auto_set_datatype_combobox()
+                self.drawfigure()
 
 
 
@@ -186,6 +263,18 @@ class FigWidget(QWidget ,FigureUI):
         self.plotdata = message3
         self.message = message4
 
+        # Auto-switch datatype ComboBox to match the actual output data type.
+        # Processing modules (Paraplate / DieMat / Three-Solution / TLcalibrate ...)
+        # can change the data format from EIS (Z/Phase) to DS (Epsilon/Sigma) or
+        # the other way. Without auto-switching, the user may see a blank/empty
+        # chart because the selected chart type does not match the data columns.
+        self._auto_set_datatype_combobox()
+
+        # When Original and Processed are different data types, default the
+        # checkboxes to "Processed only" so the chart axes match the visible
+        # data. Mutual exclusion is enforced by the click handlers.
+        self._apply_default_checkbox_state()
+
         # column_headers = self.plotdata[0].columns.tolist() if self.plotdata else "No data available"
         # print('Inputdata emitted', self.selectlist, self.plotdataname, column_headers, self.message)
 
@@ -194,6 +283,111 @@ class FigWidget(QWidget ,FigureUI):
         # print(self.plotdataname)
         # print(self.plotdata)
         # print(self.dataInfo)
+
+    def _auto_set_datatype_combobox(self):
+        """
+        Switch the datatypeComboBox to the value that best matches the currently
+        VISIBLE plotdata, taking into account:
+        - _display_synthetic flag (Input/Simulation: only original entries;
+          Filter/Processing/Fitting: both entries)
+        - Original / Processed checkboxes (only relevant when checkboxes are
+          enabled, i.e. Filter/Processing/Fitting)
+
+        Rationale: In Processing, Original and Processed can be different data
+        types — e.g. Paraplate / DieMat / Three-Solution take EIS as input and
+        produce DS as output. The chart type must follow whichever subset is
+        currently being displayed:
+        - only Original visible → use Original type (typically EIS)
+        - only Processed visible → use Processed type (DS for above methods)
+        - both visible → Processed wins (since it represents the new result)
+
+        Data type detection itself lives in
+        Datacheck.detect_data_type_from_columns so that the column-matching
+        logic stays in one place with check5 / resolve_column.
+        """
+        if not self.plotdata:
+            return
+
+        n = len(self.plotdata)
+        # Match the visibility logic in _filter_synthetic_for_display
+        if not self.message or len(self.message) != n:
+            # No/incomplete message: keep all entries (same fallback as the
+            # existing drawfigure filter)
+            visible_indices = list(range(n))
+        elif not getattr(self, '_display_synthetic', True):
+            # Input/Simulation mode: only non-synthetic (Original) entries
+            visible_indices = [
+                i for i, info in enumerate(self.message)
+                if not (isinstance(info, dict) and info.get('synthetic', False))
+            ]
+        else:
+            # Filter/Processing/Fitting: filter by checkbox state
+            show_orig = self.figuregui.origindataCheckBox.isChecked()
+            show_proc = self.figuregui.processeddataCheckBox.isChecked()
+            visible_indices = []
+            for i, info in enumerate(self.message):
+                is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
+                if is_synthetic and show_proc:
+                    visible_indices.append(i)
+                elif (not is_synthetic) and show_orig:
+                    visible_indices.append(i)
+
+        if not visible_indices:
+            return
+
+        # Detect type from the visible subset only
+        visible_data = [self.plotdata[i] for i in visible_indices]
+        visible_msg = [self.message[i] if i < len(self.message) else {}
+                       for i in visible_indices]
+
+        type_to_combo = {
+            'EIS': 'f-Z,Phase,Re(Z),Im(Z)',
+            'DS':  'f-Epsilon,Sigma',
+        }
+        detected = detect_data_type_from_columns(visible_data, visible_msg)
+        new_type = type_to_combo.get(detected)
+        if not new_type:
+            return
+        current = self.figuregui.datatypeComboBox.currentText()
+        if current == new_type:
+            return
+        # setCurrentIndex triggers currentIndexChanged -> selectionchange(),
+        # which updates the chart type button labels and checked states.
+        idx = self.figuregui.datatypeComboBox.findText(new_type)
+        if idx >= 0:
+            self.figuregui.datatypeComboBox.setCurrentIndex(idx)
+            print(f'[Figure] datatype auto-switched: {current} -> {new_type} '
+                  f'(visible {len(visible_indices)}/{n})')
+
+    def _apply_default_checkbox_state(self):
+        """
+        当 Original 和 Processed 是不同数据类型时 (例如 Paraplate 把 EIS 转为 DS),
+        默认把 Original 取消、保留 Processed 勾选 —— 否则图表类型 (DS) 会和 Original
+        (EIS) 的列错位。类型相同时 (Filter / Fitting 不改类型) 保留用户当前选择。
+
+        互斥通过 clicked 槽强制,此处只在 getsignal 第一次接收到数据时应用默认。
+        """
+        if len(self.plotdata) < 2:
+            return
+        msg = self.message if (self.message and len(self.message) >= 2) else None
+
+        # 仅检测第一条配对 (Original / Processed),代表本次处理的输出类型
+        orig_type = detect_data_type_from_columns(
+            [self.plotdata[0]],
+            [msg[0]] if msg else None,
+        )
+        proc_type = detect_data_type_from_columns(
+            [self.plotdata[1]],
+            [msg[1]] if msg else None,
+        )
+        if (orig_type in ('EIS', 'DS') and proc_type in ('EIS', 'DS')
+                and orig_type != proc_type):
+            # 类型不同:仅在"两者都勾选"时取消 Original (避免误清用户的单选偏好)
+            if (self.figuregui.origindataCheckBox.isChecked() and
+                    self.figuregui.processeddataCheckBox.isChecked()):
+                self.figuregui.origindataCheckBox.setChecked(False)
+                print(f'[Figure] Original/Processed types differ '
+                      f'({orig_type} vs {proc_type}); defaulting to Processed only')
 
 
 
@@ -217,7 +411,7 @@ class FigWidget(QWidget ,FigureUI):
                 'NyquistOption': {'text': "Nyquist\nEpsilon-Sigma", 'enabled': True, 'checked': True},
                 'BodeReOption': {'text': "Bode\nf-Sigma", 'enabled': True, 'checked': True},
                 'BodeImOption': {'text': "Bode\nf-Epsilon", 'enabled': True, 'checked': True},
-                'BodePhyOption': {'text': "Bode\n f-theta", 'enabled': True, 'checked': True},
+                'BodePhyOption': {'text': "Bode\nf-theta", 'enabled': True, 'checked': True},
                 'AllOption': {'enabled': True, 'checked': True},
                 'timeorderOption': {'enabled': False, 'checked': False},
                 'normalOption': {'enabled': False, 'checked': False}
@@ -236,10 +430,10 @@ class FigWidget(QWidget ,FigureUI):
 
         else:  # General 或其他
             self._set_button_states({
-                'NyquistOption': {'text': "Nyquist\nRe(Z)-Im(Z)", 'enabled': False, 'checked': False},
-                'BodeReOption': {'text': "Bode\nf-Re(Z)", 'enabled': False, 'checked': False},
-                'BodeImOption': {'text': "Bode\nf-Im(Z)", 'enabled': False, 'checked': False},
-                'BodePhyOption': {'text': "Bode\nf-Phase", 'enabled': False, 'checked': False},
+                'NyquistOption': {'text': "Nyquist\n(Disabled)", 'enabled': False, 'checked': False},
+                'BodeReOption': {'text': "Bode\n(Disabled)", 'enabled': False, 'checked': False},
+                'BodeImOption': {'text': "Bode\n(Disabled)", 'enabled': False, 'checked': False},
+                'BodePhyOption': {'text': "Bode\n(Disabled)", 'enabled': False, 'checked': False},
                 'AllOption': {'enabled': False, 'checked': False},
                 'timeorderOption': {'enabled': False, 'checked': False},
                 'normalOption': {'enabled': True, 'checked': True}
@@ -467,16 +661,23 @@ class FigWidget(QWidget ,FigureUI):
             print(f"Plot error: {e}")
 
     def on_all_option_clicked(self):
-        if self.figuregui.AllOption.isChecked():
-            self.figuregui.NyquistOption.setChecked(True)
-            self.figuregui.BodeReOption.setChecked(True)
-            self.figuregui.BodeImOption.setChecked(True)
-            self.figuregui.BodePhyOption.setChecked(True)
-        else:
-            self.figuregui.NyquistOption.setChecked(False)
-            self.figuregui.BodeReOption.setChecked(False)
-            self.figuregui.BodeImOption.setChecked(False)
-            self.figuregui.BodePhyOption.setChecked(False)
+        state = self.figuregui.AllOption.isChecked()
+        # 4 个 chart 按钮一次性同步,只触发一次重绘
+        for btn in (
+            self.figuregui.NyquistOption,
+            self.figuregui.BodeReOption,
+            self.figuregui.BodeImOption,
+            self.figuregui.BodePhyOption,
+        ):
+            btn.blockSignals(True)
+            try:
+                btn.setChecked(state)
+            finally:
+                btn.blockSignals(False)
+        # 主动重绘一次(替代 4 次 stateChanged 触发的 4 次重绘)
+        if getattr(self, '_processing_state_enabled', True) and self.plotdata:
+            self._auto_set_datatype_combobox()
+            self.drawfigure()
 
     def clearfigure(self):
         self.mpl.fig.clf()

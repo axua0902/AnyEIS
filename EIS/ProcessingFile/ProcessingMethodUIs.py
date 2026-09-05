@@ -251,6 +251,49 @@ class ProcessingMethodUIs:
 
         
 
+    def _apply_ref_solution_rules(self, num):
+        """
+        根据当前 refsoluionComboBox[num] 的选择,自动调整浓度输入框的状态和单位。
+
+        规则:
+            - "Water"  : 浓度禁用 + 写 0(纯水无浓度概念),单位保持 "mol/L"
+            - "Ethanol": 浓度启用,单位切到 "vol%"(体积分数)
+            - 其他      : 浓度启用,单位 "mol/L"
+        """
+        if num not in self.parent.refsoluionComboBox:
+            return
+        sol = self.parent.refsoluionComboBox[num].currentText().strip()
+
+        conc_edit = self.parent.concentrationTextEdit.get(num)
+        conc_label = self.parent.concentrationLineEdit.get(num)
+        conc_unit = self.parent.concentrationUnitLineEdit.get(num)
+
+        if sol == 'Water':
+            if conc_edit is not None:
+                conc_edit.setText('0')
+                conc_edit.setEnabled(False)
+            if conc_label is not None:
+                conc_label.setEnabled(False)
+            if conc_unit is not None:
+                conc_unit.setEnabled(False)
+                conc_unit.setText('mol/L')
+        elif sol == 'Ethanol':
+            if conc_edit is not None:
+                conc_edit.setEnabled(True)
+            if conc_label is not None:
+                conc_label.setEnabled(True)
+            if conc_unit is not None:
+                conc_unit.setEnabled(True)
+                conc_unit.setText('vol%')
+        else:  # NaCl 等需要 mol/L 浓度的参考液
+            if conc_edit is not None:
+                conc_edit.setEnabled(True)
+            if conc_label is not None:
+                conc_label.setEnabled(True)
+            if conc_unit is not None:
+                conc_unit.setEnabled(True)
+                conc_unit.setText('mol/L')
+
     def ui_ThreeSolution(self):
         self.parent.freshprocessUI()
         self.parent.defbuttn()
@@ -261,6 +304,15 @@ class ProcessingMethodUIs:
         self.parent.uiUnit(0, 2, refdataname)
         self.parent.uiUnit(1, 2, refdataname)
         self.parent.uiUnit(2, 2, refdataname)
+
+        # 根据 ref 液类型自动调整浓度输入框:Water→禁用,Ethanol→vol%
+        for i in range(3):
+            if i in self.parent.refsoluionComboBox:
+                self.parent.refsoluionComboBox[i].currentIndexChanged.connect(
+                    lambda _idx, n=i: self._apply_ref_solution_rules(n)
+                )
+                # 初始应用一次
+                self._apply_ref_solution_rules(i)
 
         # [适用条件] Three-Solution Method 用三种不同浓度/类型的参考液 (NaCl/Water/Ethanol)
         # 反演未知样品的 ε、σ。插值用 Z(实测差异 < 0.0001%, TP-004 已确认低优先级);
@@ -298,6 +350,13 @@ class ProcessingMethodUIs:
             self.parent.parent_processing_instance.clearrefdata(1)
         refdataname = ['NaCl', 'Water', 'Ethanol', 'Air']
         self.parent.uiUnit(0, 2, refdataname)
+
+        # 根据 ref 液类型自动调整浓度输入框:Water→禁用,Ethanol→vol%,Air→禁用
+        if 0 in self.parent.refsoluionComboBox:
+            self.parent.refsoluionComboBox[0].currentIndexChanged.connect(
+                lambda _idx, n=0: self._apply_ref_solution_rules(n)
+            )
+            self._apply_ref_solution_rules(0)
 
         # Add transmission line specific parameters
         tlContainer = QWidget()

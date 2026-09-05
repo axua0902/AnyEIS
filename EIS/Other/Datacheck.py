@@ -178,6 +178,30 @@ def check4(prodata, refdata):  # 参考数据与输入数据比较检查
         return 1
 
 
+def resolve_column(df, candidates, default=None):
+    """
+    在 DataFrame 的列名中查找第一个匹配候选名的列(大小写不敏感、首尾空白不敏感)。
+    用于容忍不同数据源列名变体(如 'Rs[ohm]' / 'RS[OHM]' / 'Rs' / 'Rs[Ω]')。
+
+    Args:
+        df: pandas DataFrame
+        candidates: 候选列名列表,按优先级排列
+        default: 所有候选都未匹配时返回的默认值(默认 None)
+
+    Returns:
+        匹配到的列名(原样,大小写与 DataFrame 实际列名一致),未找到则返回 default
+    """
+    if df is None or not hasattr(df, 'columns'):
+        return default
+    # 标准化:去空白 + 统一小写
+    col_lookup = {str(c).strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        key = str(cand).strip().lower()
+        if key in col_lookup:
+            return col_lookup[key]
+    return default
+
+
 def check5(data):  #判断数据类型
     """判断输入数据是EIS数据还是DS数据"""
     if not data or len(data) == 0:
@@ -275,6 +299,65 @@ def check6_freq_consistency(prodata, refdata, rtol_log=1e-3):
     return 1
 
 ##################################数据检查#############################
+
+
+def detect_data_type_from_columns(plotdata, message=None):
+    """
+    Inspect plotdata columns to determine whether the data is EIS (Z / Phase /
+    Rs / X) or DS (Epsilon / Sigma). Reuses resolve_column for the case /
+    whitespace tolerant matching used elsewhere in this module.
+
+    Priority:
+    1. Processed entries (odd indices whose dataInfo has process_applied=True)
+       — these represent the actual output of a processing module and reflect
+       the type the user wants to chart.
+    2. Fallback to any available entry — for unprocessed Input / Simulation
+       data where no processing has been applied yet.
+
+    Args:
+        plotdata: list of pandas DataFrame.
+        message:  optional list of dict (dataInfo). When provided, processed
+                  entries are detected via the 'process_applied' flag.
+
+    Returns:
+        'EIS' | 'DS' | 'UNKNOWN'
+    """
+    if not plotdata:
+        return 'UNKNOWN'
+
+    # Feature column candidates (reuse resolve_column for tolerant matching)
+    eis_cols = ('Rs[ohm]', 'X[ohm]', 'Z[ohm]')
+    ds_cols = ('EpsRE[-]', 'EpsIM[-]', 'SigmaRE[S/m]', 'SigmaIM[S/m]')
+
+    def _has_any(df, cols):
+        return any(resolve_column(df, [c]) is not None for c in cols)
+
+    def _classify(df):
+        if _has_any(df, ds_cols):
+            return 'DS'
+        if _has_any(df, eis_cols):
+            return 'EIS'
+        return None
+
+    # 1. Prefer processed entries (odd indices + process_applied flag)
+    # 约定:偶数索引是"原始"侧,奇数索引是"处理后/合成"侧,process_applied=True
+    # 只在处理后侧标。保持只扫奇数位以文档化这一约定,避免未来误用(若
+    # process_applied 误标在偶数位,会 fall through 到 fallback,行为更安全)。
+    if message and len(message) == len(plotdata):
+        for i in range(1, len(plotdata), 2):
+            info = message[i]
+            if isinstance(info, dict) and info.get('process_applied', False):
+                result = _classify(plotdata[i])
+                if result is not None:
+                    return result
+
+    # 2. Fallback: any available entry (handles raw Input / Simulation data)
+    for df in plotdata:
+        result = _classify(df)
+        if result is not None:
+            return result
+
+    return 'UNKNOWN'
 
 
 ##################################成对化工具#############################

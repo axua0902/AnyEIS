@@ -83,3 +83,10 @@ class Ui_ProcessingPage(object):
         self.inputWg.datasignal.connect(self.filterWg.getsingal)        # 从输入类向过滤类发送数据
         self.filterWg.Apdatasignal.connect(self.dataprocessWg.getsingal) # 从过滤类向数据处理类发送数据
         self.dataprocessWg.Apdatasignal.connect(self.figureWg.getsignal) # 从数据处理类向绘制图表类发送数据
+
+        # Original/Processed 复选框互斥逻辑：
+        # - Process 勾选时 (Process 模块激活) -> 启用互斥，数据可能改变类型 (EIS→DS) 需强制单选
+        # - Process 未勾选时 (仅 Filter 激活) -> 关闭互斥，允许两者同时勾选用于对比
+        self.dataprocessWg.processui.processCheckBox.stateChanged.connect(
+            lambda state: self.figureWg.set_mutual_exclusion_enabled(bool(state))
+        )

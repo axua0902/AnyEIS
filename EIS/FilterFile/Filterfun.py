@@ -16,6 +16,10 @@ from numpy import real,imag,angle,absolute,pi,log,sqrt,tanh,arctanh,array
 import numpy as np
 from scipy import signal
 
+import sys
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'Other'))
+from Datacheck import resolve_column, check5  # [TP-004] 列名兼容容差 / [TP-005] 数据类型识别
+
 
 ##############constant##############
 eps0=8.854187817e-12 #F/m Vacuum permittivity
@@ -479,61 +483,113 @@ def creatdatabase(freq,Z): #############创建结果数据库
 
 ##############subplot - 多种滤波方法对比#############
 
-def calculate_multi_filter_comparison_data(prodata, prodataname):
-    """计算多种滤波方法的对比数据，只负责数据处理，不进行绘图"""
-    
+def calculate_multi_filter_comparison_data(prodata, prodataname, custom_filters_config=None):
+    """计算多种滤波方法的对比数据，只负责数据处理，不进行绘图
+    Args:
+        prodata: 输入数据(DataFrame 列表)
+        prodataname: 数据名列表
+        custom_filters_config: 可选,用户从 UI 选择的滤波器配置
+            格式: {'MethodName': {'func': callable, 'params': dict, 'color': str}, ...}
+            为 None 时使用默认 5 个方法
+    """
+
     print("\n" + "="*60)
     print("CALCULATING MULTI-FILTER COMPARISON DATA")
     print("="*60)
-    
+
     if len(prodata) == 0:
         print("No data available for calculation")
         return None
-    
+
     # 选择第一个数据集进行展示
     original_data = prodata[0]
     original_name = prodataname[0] if len(prodataname) > 0 else "Original Data"
-    
+
+    # [TP-005] 检测数据类型(EIS / DS)并定义列名候选
+    data_type = check5([original_data])
+    freq_cands = ['FREQ[Hz]', 'Frequency[Hz]', 'Freq[Hz]', 'FREQ', 'frequency']
+    if data_type == 'DS':
+        real_cands  = ['epsRE[-]', 'PERMITTIVITY RE', 'EPSILON RE', 'EPS RE',
+                       'PERMITTIVITYRE', 'EPSILONRE', 'EPSRE', 'EpsRE[-]', 'epsRE']
+        imag_cands  = ['epsIM[-]', 'PERMITTIVITY IM', 'EPSILON IM', 'EPS IM',
+                       'PERMITTIVITYIM', 'EPSILONIM', 'EPSIM', 'EpsIM[-]', 'epsIM']
+        third_cands = ['sigmaRE[S/m]', 'CONDUCTIVITY RE', 'SIGMA RE', 'SIG RE',
+                       'CONDUCTIVITYRE', 'SIGMARE', 'SIGRE', 'sigmaRE']
+    else:  # EIS / UNKNOWN
+        real_cands  = ['Rs[ohm]', 'RS[OHM]', 'Rs[Ω]', 'RS[Ω]', 'Rs', 'R']
+        imag_cands  = ['X[ohm]', 'X[OHM]', 'X[Ω]', 'X[Ω]', 'X']
+        third_cands = ['PHASE[deg]', 'Phase[deg]', 'PHASE[DEG]', 'PHASE', 'ph', 'Phase']
+
     # 定义要对比的滤波器及其参数
-    filters_config = {
-        'Savitzky-Golay': {'func': savgol, 'params': {'a': '11', 'b': '1'}, 'color': 'red'},
-        'Median': {'func': median, 'params': {'kernel_size': '5'}, 'color': 'green'},
-        'Butterworth': {'func': butterworth, 'params': {'order': '2', 'cutoff': '0.1', 'filter_type': 'filtfilt'}, 'color': 'orange'},
-        'Arithmetic Avg': {'func': arithmeticAverage, 'params': {'window_size': '5'}, 'color': 'purple'},
-        'Sliding Avg': {'func': slidingAverage, 'params': {'window_size': '7'}, 'color': 'brown'}
-    }
-    
+    # [TP-006] 优先使用用户从 UI 选择的配置,否则使用默认 5 个方法
+    if custom_filters_config is not None and len(custom_filters_config) > 0:
+        filters_config = custom_filters_config
+        print(f"Using {len(filters_config)} user-selected filters: {list(filters_config.keys())}")
+    else:
+        filters_config = {
+            'Savitzky-Golay': {'func': savgol, 'params': {'a': '11', 'b': '1'}, 'color': 'red'},
+            'Median': {'func': median, 'params': {'kernel_size': '5'}, 'color': 'green'},
+            'Butterworth': {'func': butterworth, 'params': {'order': '2', 'cutoff': '0.1', 'filter_type': 'filtfilt'}, 'color': 'orange'},
+            'Arithmetic Avg': {'func': arithmeticAverage, 'params': {'window_size': '5'}, 'color': 'purple'},
+            'Sliding Avg': {'func': slidingAverage, 'params': {'window_size': '7'}, 'color': 'brown'}
+        }
+
     # 应用所有滤波器
     print("Applying filters for comparison...")
     filtered_results = {}
     filter_stats = {}
-    
+
     for filter_name, config in filters_config.items():
         try:
             print(f"  - Applying {filter_name} filter...")
             result = config['func']([original_data], config['params'])
             filtered_results[filter_name] = result[0]
-            
-            # 计算统计信息
-            freq_orig = original_data['FREQ[Hz]']
-            Rs_orig = original_data['Rs[ohm]']
-            X_orig = original_data['X[ohm]']
-            phy_orig = original_data['PHASE[deg]']
-            
-            Rs_filt = result[0]['Rs[ohm]']
-            X_filt = result[0]['X[ohm]']
-            phy_filt = result[0]['PHASE[deg]']
-            
-            # 计算噪声减少和信号保真度
-            noise_reduction_Rs = (np.std(Rs_orig) - np.std(Rs_filt)) / np.std(Rs_orig) * 100
-            noise_reduction_X = (np.std(X_orig) - np.std(X_filt)) / np.std(X_orig) * 100
-            noise_reduction_Phase = (np.std(phy_orig) - np.std(phy_filt)) / np.std(phy_orig) * 100
-            
+
+            # 解析列名 — 使用容差支持不同列名写法 + 支持 DS 数据
+            # [TP-004] 解决 KeyError: 'Rs[ohm]' 类问题 / [TP-005] 支持 DS
+            orig_freq   = resolve_column(original_data, freq_cands)
+            orig_real   = resolve_column(original_data, real_cands)
+            orig_imag   = resolve_column(original_data, imag_cands)
+            orig_third  = resolve_column(original_data, third_cands)  # 可选
+            filt_freq   = resolve_column(result[0], freq_cands)  or orig_freq
+            filt_real   = resolve_column(result[0], real_cands)  or orig_real
+            filt_imag   = resolve_column(result[0], imag_cands)  or orig_imag
+            filt_third  = resolve_column(result[0], third_cands) or orig_third
+
+            if not all([orig_freq, orig_real, orig_imag]):
+                missing = [n for n, c in (('FREQ', orig_freq), ('real', orig_real),
+                                          ('imag', orig_imag)) if c is None]
+                raise KeyError(f"original_data 缺少列: {missing} (实际列: {list(original_data.columns)})")
+            if not all([filt_freq, filt_real, filt_imag]):
+                missing = [n for n, c in (('FREQ', filt_freq), ('real', filt_real),
+                                          ('imag', filt_imag)) if c is None]
+                raise KeyError(f"filtered_data 缺少列: {missing} (实际列: {list(result[0].columns)})")
+
+            # 计算统计信息(统一使用 real/imag/third 命名,统计量键名保留 Rs/X/Phase 兼容旧版图)
+            real_orig = original_data[orig_real]
+            imag_orig = original_data[orig_imag]
+            real_filt = result[0][filt_real]
+            imag_filt = result[0][filt_imag]
+
+            def _safe_pct(a, b):
+                sa = np.std(a)
+                return (sa - np.std(b)) / sa * 100 if sa > 0 else 0.0
+
+            noise_reduction_Rs    = _safe_pct(real_orig, real_filt)
+            noise_reduction_X     = _safe_pct(imag_orig, imag_filt)
+            if orig_third and filt_third:
+                third_orig = original_data[orig_third]
+                third_filt = result[0][filt_third]
+                noise_reduction_Phase = _safe_pct(third_orig, third_filt)
+                correlation_Phase = float(np.corrcoef(third_orig, third_filt)[0, 1])
+            else:
+                noise_reduction_Phase = 0.0
+                correlation_Phase = 0.0
+
             # 计算信号保真度 (相关系数)
-            correlation_Rs = np.corrcoef(Rs_orig, Rs_filt)[0, 1]
-            correlation_X = np.corrcoef(X_orig, X_filt)[0, 1]
-            correlation_Phase = np.corrcoef(phy_orig, phy_filt)[0, 1]
-            
+            correlation_Rs = float(np.corrcoef(real_orig, real_filt)[0, 1])
+            correlation_X  = float(np.corrcoef(imag_orig, imag_filt)[0, 1])
+
             filter_stats[filter_name] = {
                 'noise_reduction': {
                     'Rs': noise_reduction_Rs,
@@ -547,7 +603,7 @@ def calculate_multi_filter_comparison_data(prodata, prodataname):
                 },
                 'color': config['color']
             }
-            
+
         except Exception as e:
             print(f"  - Error applying {filter_name}: {e}")
             continue
@@ -575,7 +631,15 @@ def calculate_multi_filter_comparison_data(prodata, prodataname):
         'filtered_results': filtered_results,
         'filter_stats': filter_stats,
         'filters_config': filters_config,
-        'performance_scores': performance_scores
+        'performance_scores': performance_scores,
+        # [TP-005] 透传数据类型与列名映射给绘图层
+        'data_type': data_type,
+        'column_map': {
+            'freq':  orig_freq,
+            'real':  orig_real,
+            'imag':  orig_imag,
+            'third': orig_third,
+        },
     }
 
 ##############subplot - 原始单个滤波结果对比#############
