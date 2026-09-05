@@ -189,10 +189,16 @@ class FigWidget(QWidget ,FigureUI):
             if (self.figuregui.origindataCheckBox.isChecked() and
                     self.figuregui.processeddataCheckBox.isChecked()):
                 # 启用互斥时若两者都勾选,强制单选 (Processed 优先,与图表类型一致)
-                # 注意:此处不要 blockSignals — setChecked 触发的 stateChanged
-                # 会驱动 _on_processing_state_changed 按新状态重绘画布,
-                # 这是一次必要重绘(block 掉会导致画布停留在旧状态)
-                self.figuregui.origindataCheckBox.setChecked(False)
+                # 用 blockSignals 抑制 stateChanged → _on_processing_state_changed → drawfigure。
+                # 互斥规则切换是状态调整而非用户主动触发绘图,
+                # 用户期望的流程是:选处理方法 → 点 Process 计算 → 点 Draw 绘图,
+                # 切互斥只是"准备好"互斥规则,不应在此过程中重绘。
+                # (这与 _on_proc_checkbox_clicked 内部 setChecked 的处理模式一致,见 line 244-252)
+                self.figuregui.origindataCheckBox.blockSignals(True)
+                try:
+                    self.figuregui.origindataCheckBox.setChecked(False)
+                finally:
+                    self.figuregui.origindataCheckBox.blockSignals(False)
                 print('[Figure] mutual exclusion ON; Original unchecked, Processed kept')
 
     def _on_processing_state_changed(self):
