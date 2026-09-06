@@ -70,7 +70,7 @@ class Ui_SimulationPage(object):
 
     def on_simulation_tab_changed(self, index):
         if index == 0:
-            self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Z,Phy,Rs,X')
+            self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Z,Phase,Re(Z),Im(Z)')
         elif index == 1:
             self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Epsilon,Sigma')
         elif index == 2:

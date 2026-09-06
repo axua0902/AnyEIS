@@ -108,6 +108,15 @@ class Ui_FittingPage(object):
         self.FittingWg.Fittingdatasignal.connect(self.figureWg.getsignal)# 从拟合类向绘制图表类发送数据
         self.FittingWg.Fittingdatasignal.connect(self.resultsWg.getsingal)# 从拟合类向结果类发送数据
 
+        # Tab 切换时同步 figure 数据类型下拉框
+        self.FittingWg.currentChanged.connect(self.on_fitting_tab_changed)
+
+    def on_fitting_tab_changed(self, index):
+        if index == 0:
+            self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Z,Phase,Re(Z),Im(Z)')
+        elif index == 1:
+            self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Epsilon,Sigma')
+
 
 
 

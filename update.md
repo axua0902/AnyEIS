@@ -12,7 +12,7 @@
 
 | ID | 模块 | 严重度 | 现象 | 状态 |
 |----|------|--------|------|------|
-| — | — | — | — | — |
+| Bug #004 | Simulation/Fitting Tab 联动 | 🟡 中等 | Tab 切换未同步 figure 数据类型下拉框(详见归档) | ✅ 已修复(2026-09-06) |
 
 ---
 
@@ -55,6 +55,36 @@
 | Bug #001 | Filter/Processing "处理后数据全部相同" | ✅ 已修复 |
 | Bug #002 | Dielectric Material UI 锁 Air+Water | ✅ 已修复 |
 | Bug #003 | Dielectric Material UI 取消 Alcohol | ✅ 已修复 |
+| Bug #004 | Simulation/Fitting Tab 切换未联动 figure 数据类型 | ✅ 已修复(2026-09-06) |
+
+**Bug #004 详情**:
+
+- **现象**:
+  - Simulation 页面选择 Tab0(Equivalent circuit)时,figure 区域的 `datatypeComboBox` 未切换到 `f-Z,Phase,Re(Z),Im(Z)`,导致图表按钮组(Nyquist/Bode Re/Im/Phy)仍显示 Multi-terms model 的标签(Bode f-Sigma / f-Epsilon / f-theta)与勾选状态。
+  - Fitting 页面完全没有 Tab 切换联动逻辑,无论选哪个 tab,figure 的 datatypeComboBox 都保持初始值不动。
+- **涉及文件**:
+  - `GUI/pages/ui_page_simulation.py` — `on_simulation_tab_changed`(L71-L77)
+  - `GUI/pages/ui_page_fitting.py` — 类 `Ui_FittingPage`(L105-L109 后追加)
+- **根因分析**:
+  - `ui_page_simulation.py:73` 硬编码的字符串 `'f-Z,Phy,Rs,X'` 与 `ui_Figure.py:115` 中下拉框实际项 `'f-Z,Phase,Re(Z),Im(Z)'` **不匹配**。`QComboBox.setCurrentText()` 找不到完全匹配项时**静默失败**,下拉框状态保持不变。
+  - `ui_page_fitting.py` 整个类**未连接** `FittingWg.currentChanged` 信号,缺少 `on_fitting_tab_changed` 回调。
+- **修复方案**:
+  - `ui_page_simulation.py:73`:`'f-Z,Phy,Rs,X'` → `'f-Z,Phase,Re(Z),Im(Z)'`。
+  - `ui_page_fitting.py:111-L118` 追加:
+    ```python
+    # Tab 切换时同步 figure 数据类型下拉框
+    self.FittingWg.currentChanged.connect(self.on_fitting_tab_changed)
+
+    def on_fitting_tab_changed(self, index):
+        if index == 0:
+            self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Z,Phase,Re(Z),Im(Z)')
+        elif index == 1:
+            self.figureWg.figuregui.datatypeComboBox.setCurrentText('f-Epsilon,Sigma')
+    ```
+- **验证**:
+  - Simulation 页面:Tab0 ↔ Tab1 切换,figure 按钮组标签在 `f-Z,Phase,Re(Z),Im(Z)` 与 `f-Epsilon,Sigma` 两套配置间正确切换。
+  - Fitting 页面:Tab0(Equivalent circuit)切换后 `datatypeComboBox` 变更为 `f-Z,Phase,Re(Z),Im(Z)`;Tab1(Multi-terms model)切换后变更为 `f-Epsilon,Sigma`,按钮组文字与勾选状态同步刷新(由 `Figure.selectionchange` 触发 `_set_button_states`)。
+  - 风险点:`setCurrentText` 会触发 `currentIndexChanged → selectionchange`,但因当前无 plotdata,`_set_button_states` 只更新按钮文字与勾选状态,不触发重绘,无副作用。
 
 ### TP 系列 — Processingfun.py 理论问题(已全部决策)
 
@@ -99,7 +129,7 @@
 - **MT-005** — `requirements.txt` 新增 `openpyxl>=3.1.0` 与说明注释;同步追加到 `README.md`、`ui_left_setting.py`、`ui_left_column.py` 依赖展示。
 - **MT-006** — `EIS/FittingFile/FittingWarnings.py`(L57, L69) 与 `EIS/FigureFile/Funtest/Plotfuntest.py`(L10, L21, L203, L226) 全部 `PyQt5` → `PySide6`,`app.exec_()` → `app.exec()`,类名 `MyMplCanvasPyQt5` → `MyMplCanvasPySide6`;同步报告文档 `Funtest_Run_Issues_Summary.md`(L51) 引用更新。
 
-**汇总**: Bug/TP 系列 18 个条目 — ✅ 13 已修复 / ✅ 2 已解决 / 🟢 2 复审撤销或降级 / ⏸️ 3 不修复(已记录理由);MT 系列 6 个条目全部 ✅ 已完成。**无未决问题**。
+**汇总**: Bug/TP 系列 19 个条目 — ✅ 14 已修复 / ✅ 2 已解决 / 🟢 2 复审撤销或降级 / ⏸️ 3 不修复(已记录理由);MT 系列 6 个条目全部 ✅ 已完成。**无未决问题**。
 
 ---
 
@@ -115,6 +145,7 @@
 | 2026-09-04 | R2 | RF 系列 + UI 联动 | TP-014, TP-015, TP-017, TP-018 修复 |
 | 2026-09-05 | — | 文档重组 | BUGS.md → update.md(归档已处理项) |
 | 2026-09-05 | MT | 协议 / 元数据 / 依赖 / Qt 框架 | MT-001 ~ MT-006:Apache 2.0、版本号对齐、openpyxl 补充、PyQt5→PySide6 |
+| 2026-09-06 | Bug #004 | Simulation/Fitting Tab 联动 | `ui_page_simulation.py:73` 字符串修正 + `ui_page_fitting.py` 补全 `currentChanged` 联动 |
 
 ---
 
