@@ -81,7 +81,7 @@ Access settings via the gear icon (⚙️) in the bottom menu bar.
 
 ## Copyright & License
 * **Copyright:** AnyEIS® © 2025. All rights reserved.
-* **License:** For **academic and non-commercial use**, this software is provided under the **MIT Open Source License**. You must retain all copyright notices.
+* **License:** For **academic and non-commercial use**, this software is provided under the **Apache License 2.0**. You must retain all copyright notices.
 * **Commercial Use:** Requires a separate commercial license. Please contact the development team for authorization.
 * **Disclaimer:** The software relies on third-party libraries under their respective licenses. The developers are not responsible for data loss due to system conflicts or unsupported use (e.g., on macOS/Linux).
 

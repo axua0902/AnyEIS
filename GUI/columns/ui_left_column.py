@@ -152,7 +152,7 @@ class Ui_LeftColumn(object):
         self.label_copyright.setText(QCoreApplication.translate(
             "LeftColumn",
             u"© 2023-2025 AnyEIS Authors. All rights reserved.<br>"
-            u'<a href="https://opensource.org/licenses/MIT">License: MIT License</a>',
+            u'<a href="https://www.apache.org/licenses/LICENSE-2.0">License: Apache License 2.0</a>',
             None
         ))
         self.label_contact.setText(QCoreApplication.translate(

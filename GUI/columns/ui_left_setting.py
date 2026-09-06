@@ -223,23 +223,22 @@ class Ui_LeftSetting(object):
         about_info = """
         <h3>AnyEIS</h3>
         <p>Version: v1.0.0</p>
-        <p>© 2023-2025 AnyEIS Authors. All rights reserved.</p>
-        <p><a href="https://opensource.org/licenses/MIT">License: MIT License</a></p>
+        <p>© 2020-2026 AnyEIS Authors. All rights reserved.</p>
+        <p><a href="https://www.apache.org/licenses/LICENSE-2.0">License: Apache License 2.0</a></p>
         <hr>
-        <p><b>Official Website:</b> <a href="https://anyeis.org">https://anyeis.org</a></p>
-        <p><b>Support Email:</b> support@anyeis.org</p>
-        <p><b>GitHub:</b> <a href="https://github.com/zhan9013/AnyEIS">github.com/zhan9013/AnyEIS</a></p>
+        <p><b>Support Email:</b> zhan234@outlook.com</p>
+        <p><b>GitHub:</b> <a href="https://github.com/axua0902/AnyEIS">github.com/axua0902/AnyEIS</a></p>
         <hr>
-        <p><b>Contributors:</b> Zhang San, Li Si, Wang Wu</p>
+        <p><b>Contributors:</b> Zhang An</p>
         <p><b>Developer:</b> AnyEIS Authors</p>
-        <p><b>Release Date:</b> 2025-06-26</p>
+        <p><b>Release Date:</b> 2026.09.01</p>
         <hr>
         <p>Acknowledgements: Thanks to all testers and community supporters.</p>
         <hr>
         <p><b>Dependencies:</b><br>
-        PySide6 >= 6.5, numpy >= 1.24, pandas >= 2.0,<br>
-        matplotlib >= 3.7, xlsxwriter >= 3.1, lmfit >= 1.2,<br>
-        schemdraw >= 0.18, scipy >= 1.10, mpmath >= 1.3</p>
+        PySide6 &gt;= 6.5.0, numpy &gt;= 1.24.0, pandas &gt;= 2.0.0,<br>
+        matplotlib &gt;= 3.7.0, xlsxwriter &gt;= 3.1.0, lmfit &gt;= 1.2.0,<br>
+        schemdraw &gt;= 0.18.0, scipy &gt;= 1.10.0, mpmath &gt;= 1.3.0</p>
         """
         msg_box = QMessageBox()
         msg_box.setWindowTitle("About AnyEIS")
