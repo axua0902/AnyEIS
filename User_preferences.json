@@ -1,0 +1,29 @@
+{
+    "app_name": "AnyEIS",
+    "version": "v1.0.0",
+    "theme_name": "light6",
+    "language": "zh",
+    "working_path": "Results",
+    "top_settings": {
+        "paths": {
+            "pending_data": "Results",
+            "reference_data": "Data",
+            "results_data": "Results",
+            "input_data": "Data"
+        },
+        "export_image": {
+            "format": "jpg",
+            "resolution": 100,
+            "formats_available": [
+                "png",
+                "jpg",
+                "svg",
+                "pdf"
+            ]
+        },
+        "user_preferences": {
+            "interface_layout": "default",
+            "auto_save": false
+        }
+    }
+}
