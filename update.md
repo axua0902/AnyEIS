@@ -1,6 +1,6 @@
 # AnyEIS 更新与问题跟踪
 
-> **生成时间**: 2026-09-05
+> **生成时间**: 2026-09-06
 > **来源**: 由 `BUGS.md` 重组而来,所有已修复 / 不修复 / 复审撤销的条目已归档至 git 历史,本文件仅保留当前活跃问题与新发现。
 > **归档索引**: 历史条目见 `BUGS.md` 提交记录(汇总 18 条均已决策)。
 
@@ -13,6 +13,7 @@
 | ID | 模块 | 严重度 | 现象 | 状态 |
 |----|------|--------|------|------|
 | Bug #004 | Simulation/Fitting Tab 联动 | 🟡 中等 | Tab 切换未同步 figure 数据类型下拉框(详见归档) | ✅ 已修复(2026-09-06) |
+| Bug #005 | Fitting/Simulation 计算行 Clear 按钮 | 🟠 较严重 | MT 的 Clear 按钮孤立(无 connect);EC 的 Clear 槽实现不完整或被覆盖 | ✅ 已修复(2026-09-06) |
 
 ---
 
@@ -56,6 +57,8 @@
 | Bug #002 | Dielectric Material UI 锁 Air+Water | ✅ 已修复 |
 | Bug #003 | Dielectric Material UI 取消 Alcohol | ✅ 已修复 |
 | Bug #004 | Simulation/Fitting Tab 切换未联动 figure 数据类型 | ✅ 已修复(2026-09-06) |
+| Bug #005 | 计算行 Clear 按钮孤立 / 槽实现不一致 | ✅ 已修复(2026-09-06) |
+| Bug #005b | Clear 误清 Fixed 列 / Simulation 6 列错位 | ✅ 已修复(2026-09-06) |
 
 **Bug #004 详情**:
 
@@ -85,6 +88,105 @@
   - Simulation 页面:Tab0 ↔ Tab1 切换,figure 按钮组标签在 `f-Z,Phase,Re(Z),Im(Z)` 与 `f-Epsilon,Sigma` 两套配置间正确切换。
   - Fitting 页面:Tab0(Equivalent circuit)切换后 `datatypeComboBox` 变更为 `f-Z,Phase,Re(Z),Im(Z)`;Tab1(Multi-terms model)切换后变更为 `f-Epsilon,Sigma`,按钮组文字与勾选状态同步刷新(由 `Figure.selectionchange` 触发 `_set_button_states`)。
   - 风险点:`setCurrentText` 会触发 `currentIndexChanged → selectionchange`,但因当前无 plotdata,`_set_button_states` 只更新按钮文字与勾选状态,不触发重绘,无副作用。
+
+**Bug #005 详情**:
+
+- **现象**:
+  - [MTMUI.py#L516-529](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/ModelFile/MTMUI.py#L516-L529) 的 `self.clearBtn`（计算行 Clear 按钮）**完全没有 connect** —— `Fitting.py` 和 `simulation.py` 中只连了 `self.tab1.clearBtn.clicked.connect(self.clearCalculation)`,**没有任何地方 connect `self.tab2.clearBtn`**。结果:用户点击 MT 的 Clear 按钮无任何反应。
+  - EC 的 Clear 槽实现不一致: `Fitting.py` 的 `clearCalculation` 是空函数（仅 `return`）;`simulation.py` 的 `clearCalculation` 实际是 B-2 语义（清空整个模型）,与 `clearECMModel` 功能高度重叠。
+  - ECUI.py 与 MTMUI.py 的 `clearBtn` 创建代码本身是一致的（视觉/样式无差异）,问题在于**信号连接和槽实现**。
+  - `clearModelBtn`（文件行）已经有完整工作流（`clearECMModel` / `clearMTModel`）,且用了**警示色**（MTMUI: dark_blue,ECUI: red_primary）。两套 Clear 按钮**职责应互补**而非重复。
+- **涉及文件**:
+  - `EIS/FittingFile/Fitting.py` — `clearCalculation`（L478,空函数）→ `clearECCalculation`（新增 B-1 实现）;新增 `clearMTCalculation`
+  - `EIS/FittingFile/Fitting.py` — connect 区块:`self.tab1.clearBtn.clicked.connect(self.clearCalculation)` → `self.clearECCalculation`;新增 `self.tab2.clearBtn.clicked.connect(self.clearMTCalculation)`
+  - `EIS/SimulationFile/simulation.py` — `clearCalculation`（L200, B-2 语义）→ `clearECCalculation`（B-1 语义）;`clearMTCalculation`（L336, B-2 语义）→ B-1 语义
+  - `EIS/SimulationFile/simulation.py` — connect 区块同上
+- **根因分析**:
+  - **历史债务**: `tab2.clearBtn` 从未被 connect,导致 MTMUI 的 Clear 按钮始终孤立;`tab1.clearBtn` 的 connect 目标在不同文件中语义不一致（空函数 vs B-2 重型清空）。
+  - **职责重叠**: 文件行已有 `clearModelBtn`（红色警示色）做"清空模型";计算行的 `clearBtn`（灰色普通色）若也清空模型,既冗余又与红色警示色按钮功能冲突。
+  - **设计结论**: 采用 B-1 语义 —— 计算行 Clear = "清空最近一次 Calculate 的输出",保留模型结构(电路/方程/参数初值/连接文本/勾选);文件行 Clear Model = "重置整个模型"(由 `clearModelBtn` 已承担)。
+- **修复方案**:
+  - B-1 合约(以 Fitting.py 为准,simulation.py 同形):
+
+    ```python
+    def clearECCalculation(self):
+        # 清空 fitteddata / fittedresults / resultsdataInfo
+        self.fitteddata = list()
+        self.fittedresults = list()
+        self.resultsdataInfo = []
+        # 清空全局 plot 副本
+        global plotdata, plotdataname, outputlist
+        plotdata = list(); plotdataname = list(); outputlist = list()
+        # 清空 ECMtable 的 Fitted_Value(3) / Fixed(6) / Error [%](7) 列
+        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5)
+        for row in range(self.tab1.ECMtable.rowCount()):
+            for col in (3, 6, 7):
+                self.tab1.ECMtable.setItem(row, col, QTableWidgetItem(""))
+    ```
+  - `clearMTCalculation` 同形,作用于 `self.tab2.MTtable`。
+  - **保留**:`circuit` / `params` / `termnamelist` / `modelterm` / `MTexpre` / `MTmultitermTextEdit` / `connectionTextEdit` / `option` / EP&DC 勾选 / `MTparams`。
+  - **simulation.py** 的 `clearECCalculation` / `clearMTCalculation` 因没有 fitteddata 字段,只清全局 plot 副本与表格 Fitted 列。
+  - **connect** 调整:
+    - `self.tab1.clearBtn.clicked.connect(self.clearCalculation)` → `self.clearECCalculation`
+    - **新增** `self.tab2.clearBtn.clicked.connect(self.clearMTCalculation)`
+    - `clearModelBtn` 的 connect 保持不变（仍接 `clearECMModel` / `clearMTModel`）。
+- **验证**:
+  - 新建 `EIS/FittingFile/Funtest/test_clear_calculation.py`(19 个测试用例,全部通过):
+    - 4 个 `TestClearECCalculation`:验证 fitteddata/resultsdataInfo 清空、全局 plotdata 清空、表格只清 3/6/7 列、circuit/params/connectionTextEdit 保留
+    - 5 个 `TestClearMTCalculation`:同上 + termnamelist/modelterm/MTexpre/option/MTmultitermTextEdit/EP&DC 全部保留
+    - 4 个 `TestSimulationClearMethods`:simulation.py 同形 B-1 验证
+    - 5 个 `TestSignalConnections`:静态校验 connect 语句中按钮→槽的映射,确保 `tab2.clearBtn` 真正 connect 到 `clearMTCalculation`;`tab1.clearBtn` 不再 connect 旧 `clearCalculation`;Fitting.py 中旧的 `def clearCalculation(self):` 已删除
+  - 关键 mock 技巧:不实例化 Fitting/Simu 类（避免触发 PyTabWidget2 等重依赖 + native crash 风险）,用 `unittest.mock.MagicMock` + `types.SimpleNamespace` 构造最小对象,将 `Fitting.clearECCalculation` 作为函数直接调用,验证对 `self.fitteddata` / `self.tab1.ECMtable.setItem` / 全局变量的访问路径与清空列范围
+  - 完整 import 链验证:`python -c "from EIS.FittingFile.Fitting import Fitting; from EIS.SimulationFile.simulation import Simu"` 通过,四个新方法都正确导出。
+  - 测试结果: **19/19 通过**(`pytest EIS/FittingFile/Funtest/test_clear_calculation.py -v`,耗时 4.46s)。
+  - 无回归:`test_all_methods.py` 中 4 个原有测试 + 1 个 mt_flow 全部通过(原生的 `test_extreme_conditions` / `test_noise_levels` 在我修改前就存在 STATUS_STACK_BUFFER_OVERRUN 崩溃,与本次修改无关)。
+
+**Bug #005b 详情(Clear 按钮第二轮修复)**:
+
+- **用户反馈**:
+  > "MT的clear按下后，再按计算，不可以进行新的计算，表格模型参数的名字都被删掉了，而ECM按下后，再按计算，可以进行新的计算。检查差异，统一逻辑。"
+
+- **根因诊断**(用 `debug_clear_mt.py` 在 6 列/8 列 MTtable 上直接复现):
+  - **关键差异**:MTtable 在 Fitting 路径下是 **8 列**,在 Simulation 路径下被强制改为 **6 列**(无 Fitted_Value, 无 Error [%])。
+  - **Bug 5a**:第一轮我设计的 `cleared_cols = (3, 6, 7)`,在 Fitting 8 列下:
+    - col 3 = Fitted_Value ✓ 应清
+    - col 6 = **Fixed 用户输入** ❌ 被误清
+    - col 7 = Error [%] ✓ 应清
+  - **Bug 5a**:同一份代码在 Simulation 6 列下:
+    - col 3 = **Max 用户输入** ❌ 被误清(Max 在 6 列下排在第 3 位!)
+    - col 6/7 越界但 setItem 不抛错
+    - 用户看到"参数名字/边界被删掉"就是这一症状
+  - **错位结构**:
+    | 列索引 | Fitting 8 列 | Simulation 6 列 |
+    |---|---|---|
+    | 0 | Name | Name |
+    | 1 | Comments | Comments |
+    | 2 | Initial_Value | Initial_Value |
+    | 3 | Fitted_Value | **Max** ❌ |
+    | 4 | Max | Min |
+    | 5 | Min | Fixed |
+    | 6 | **Fixed** ❌ | (无) |
+    | 7 | Error [%] | (无) |
+
+- **修复方案**:
+  - Fitting 路径: `cleared_cols = (3, 7)` —— **保留 col 6 (Fixed 用户输入)**
+  - Simulation 路径: **完全不动表格** —— 6 列无 Fitted_Value / Error [%] 列,所有列均为用户输入
+  - ECMtable 同形: Fitting 8 列下也保留 col 6 (Fixed),Simulation 6 列下不动
+  - 对称性:clearECCalculation / clearMTCalculation 在 Fitting 与 Simulation 两条路径下行为完全对称
+
+- **验证**(`test_clear_calculation.py` 扩到 23 个测试用例,全部通过):
+  - 新增 `TestRealTableIntegration`(3 个真实 QTableWidget 集成测试,需 QApplication):
+    - `test_Fitting_clearMTCalculation_on_8col_preserves_all_user_input`:在 8 列 MTtable 上,验证 clear 后 Name/Comments/Initial_Value/Max/Min/Fixed 全部保留,只清 Fitted_Value/Error [%]
+    - `test_Fitting_clearECCalculation_on_8col_preserves_Fixed`:ECMtable Fixed 列在 clear 后必须仍为 'False' (用户输入不被误清)
+    - `test_simulation_clearMTCalculation_on_6col_does_nothing_to_table`:6 列 MTtable 在 Simulation 路径下完全不变,columnCount 保持 6 不被 setItem 越界扩展
+  - 新增回归保护测试 `test_clear_uses_cleared_cols_3_7_not_including_6`:静态扫描 Fitting.py / simulation.py 中 `clearECCalculation` / `clearMTCalculation` 函数体,确保不再包含 `(3, 6, 7)` 这种错误配置
+  - 调整原有断言: `test_clears_ecm_table_columns_3_and_7_only` / `test_clears_mt_table_columns_3_and_7_only` 从 9 次 setItem 改为 6 次,`forbidden` 列集合增加 6
+  - 调整 `TestSimulationClearMethods`: 4 个测试现在验证 `setItem` / `clearContents` / `setRowCount` 都不被调用
+  - 测试结果: **23/23 通过**(耗时 4.27s)
+
+- **遗留观察**(非本轮问题,记录供后续):
+  - Fitting.MTcalculation(L591) 强制覆盖 `MTlowfreqTextEdit` / `MTupfreqTextEdit`,这是另一处隐式行为,但不在 Clear 按钮的修复范围。
+  - simulation.MTcalculation 读 col 0/2 (Name/Initial_Value),不读 col 3/4/5,所以 simulation 路径下即使 6 列也不会因 max/min 缺失而崩溃(但 Fitting 路径 MTcalculation 读 col 0/2/4/5,8 列下恰好正确)。
 
 ### TP 系列 — Processingfun.py 理论问题(已全部决策)
 
@@ -129,7 +231,7 @@
 - **MT-005** — `requirements.txt` 新增 `openpyxl>=3.1.0` 与说明注释;同步追加到 `README.md`、`ui_left_setting.py`、`ui_left_column.py` 依赖展示。
 - **MT-006** — `EIS/FittingFile/FittingWarnings.py`(L57, L69) 与 `EIS/FigureFile/Funtest/Plotfuntest.py`(L10, L21, L203, L226) 全部 `PyQt5` → `PySide6`,`app.exec_()` → `app.exec()`,类名 `MyMplCanvasPyQt5` → `MyMplCanvasPySide6`;同步报告文档 `Funtest_Run_Issues_Summary.md`(L51) 引用更新。
 
-**汇总**: Bug/TP 系列 19 个条目 — ✅ 14 已修复 / ✅ 2 已解决 / 🟢 2 复审撤销或降级 / ⏸️ 3 不修复(已记录理由);MT 系列 6 个条目全部 ✅ 已完成。**无未决问题**。
+**汇总**: Bug/TP 系列 21 个条目 — ✅ 16 已修复 / ✅ 2 已解决 / 🟢 2 复审撤销或降级 / ⏸️ 3 不修复(已记录理由);MT 系列 6 个条目全部 ✅ 已完成。**无未决问题**。
 
 ---
 
@@ -146,6 +248,8 @@
 | 2026-09-05 | — | 文档重组 | BUGS.md → update.md(归档已处理项) |
 | 2026-09-05 | MT | 协议 / 元数据 / 依赖 / Qt 框架 | MT-001 ~ MT-006:Apache 2.0、版本号对齐、openpyxl 补充、PyQt5→PySide6 |
 | 2026-09-06 | Bug #004 | Simulation/Fitting Tab 联动 | `ui_page_simulation.py:73` 字符串修正 + `ui_page_fitting.py` 补全 `currentChanged` 联动 |
+| 2026-09-06 | Bug #005 | 计算行 Clear 按钮 | Fitting/simulation.py 拆分 `clearECCalculation` / `clearMTCalculation`（B-1 语义），connect `tab2.clearBtn`；新建 test_clear_calculation.py（19/19 通过） |
+| 2026-09-06 | Bug #005b | Clear 误清 Fixed 列 / Simulation 6 列错位 | 调整 cleared_cols = (3, 7) 不含 6（保留 Fixed 用户输入）；simulation 路径 6 列表无计算结果列，完全不动表；test_clear_calculation.py 扩到 23/23 通过 |
 
 ---
 

@@ -163,7 +163,7 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.tab1.addconnectionBtn.clicked.connect(self.addconnection)
         self.tab1.undoBtn.clicked.connect(self.undo)
         self.tab1.calculateBtn.clicked.connect(self.ECMcalculation)
-        self.tab1.clearBtn.clicked.connect(self.clearCalculation)
+        self.tab1.clearBtn.clicked.connect(self.clearECCalculation)
         self.tab1.modelfigBtn.clicked.connect(self.modelfig)
         self.tab1.newBtn.clicked.connect(self.newECMModel)
         self.tab1.openModelBtn.clicked.connect(self.openECMModel)
@@ -175,6 +175,7 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.tab2.addtermBtn.clicked.connect(self.addterm)
         self.tab2.deletetermBtn.clicked.connect(self.deleteterm)
         self.tab2.MTcalculateBtn.clicked.connect(self.MTcalculation)
+        self.tab2.clearBtn.clicked.connect(self.clearMTCalculation)
         self.tab2.EPcheckBox.stateChanged.connect(self.EPconfirm)
         self.tab2.DCcheckBox.stateChanged.connect(self.DCconfirm)
         self.tab2.newBtn.clicked.connect(self.newMTModel)
@@ -475,8 +476,69 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.sendsignal(outputlist, plotdataname, ECMoutputdata, self.resultsdataInfo)
         print(f"[ECMcalculation] 完成")
 
-    def clearCalculation(self):
-        return
+    def clearECCalculation(self):
+        """
+        清空 ECM 最近一次 Calculate 的输出（计算行 Clear 按钮槽）。
+        保留模型结构（circuit、termnamelist、modelterm、connectionTextEdit、ECMtable 行及
+        Name/Comments/Initial_Value/Max/Min/Fixed 列），
+        只清空 fitteddata / fittedresults / resultsdataInfo、全局 plot 副本，以及 ECMtable
+        的 Fitted_Value(3) / Error [%](7) 列。
+        """
+        # 清空拟合输出缓存
+        self.fitteddata = list()
+        self.fittedresults = list()
+        self.resultsdataInfo = []
+
+        # 清空全局 plot 副本（仅清拟合期追加的部分；原始数据由导入流程维护）
+        try:
+            global plotdata, plotdataname, outputlist
+            plotdata = list()
+            plotdataname = list()
+            outputlist = list()
+        except Exception:
+            pass
+
+        # 清空 ECMtable 的 Fitted_Value(3) / Error [%](7) 列
+        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5) / Fixed(6)
+        # 注意:Fixed 是用户输入的"是否固定参数"标志,不能误清
+        cleared_cols = (3, 7)
+        for row in range(self.tab1.ECMtable.rowCount()):
+            for col in cleared_cols:
+                self.tab1.ECMtable.setItem(row, col, QTableWidgetItem(""))
+
+        print('[clearECCalculation] ECM calculation output cleared (model preserved)')
+
+    def clearMTCalculation(self):
+        """
+        清空 MT 最近一次 Calculate 的输出（计算行 Clear 按钮槽）。
+        保留模型结构（modelterm、termnamelist、MTmultitermTextEdit、MTtable 行及
+        Name/Comments/Initial_Value/Max/Min/Fixed 列、EP/DC 勾选），
+        只清空 fitteddata / fittedresults / resultsdataInfo、全局 plot 副本，以及 MTtable
+        的 Fitted_Value(3) / Error [%](7) 列。
+        """
+        # 清空拟合输出缓存
+        self.fitteddata = list()
+        self.fittedresults = list()
+        self.resultsdataInfo = []
+
+        # 清空全局 plot 副本
+        try:
+            global plotdata, plotdataname, outputlist
+            plotdata = list()
+            plotdataname = list()
+            outputlist = list()
+        except Exception:
+            pass
+
+        # 清空 MTtable 的 Fitted_Value(3) / Error [%](7) 列
+        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5) / Fixed(6)
+        # 注意:Fixed 是用户输入的"是否固定参数"标志,不能误清
+        cleared_cols = (3, 7)
+        for row in range(self.tab2.MTtable.rowCount()):
+            for col in cleared_cols:
+                self.tab2.MTtable.setItem(row, col, QTableWidgetItem(""))
+
+        print('[clearMTCalculation] MT calculation output cleared (model preserved)')
 
     def modelfig(self):
         self.modelfigureLablel = QLabel()
