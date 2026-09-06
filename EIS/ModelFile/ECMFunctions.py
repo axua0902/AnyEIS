@@ -9,7 +9,6 @@ import os
 import json
 from datetime import datetime
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
-from PySide6.QtCore import Qt
 from lmfit import Parameters
 
 
@@ -66,9 +65,15 @@ def create_ecm_model_json(obj):
             - current_model_path: 当前模型文件路径
             - circuit: 电路元件列表
             - ECMparams: lmfit Parameters 对象
+            - _ecm_param_bounds: (可选) Bug #006 Phase 2.5 simu 隐藏持久化字典
 
     返回:
         dict: ECM模型的JSON数据
+
+    说明(Bug #006 Phase 2.5):
+        根据当前 ECMtable 的列数自适应读取:
+        - 7 列 (fit 模式): 从 col 4/5 读 min/max
+        - 3 列 (simu 模式): 表内无 min/max, 从 `obj._ecm_param_bounds` 隐藏字典取
     """
     model_name = "Untitled Model"
     if hasattr(obj, 'current_model_path') and obj.current_model_path:
@@ -91,21 +96,61 @@ def create_ecm_model_json(obj):
     }
 
     table = obj.tab1.ECMtable
+    ncols = table.columnCount()
+    is_full = ncols >= 7
+    hidden = getattr(obj, '_ecm_param_bounds', None) or {}
+
     for row in range(table.rowCount()):
-        param = {}
-        for col, header in enumerate(['name', 'display_name', 'value', 'unit', 'min', 'max', 'fixed']):
-            item = table.item(row, col)
-            if header == 'fixed':
-                param[header] = (item.checkState() == Qt.CheckState.Checked) if item else False
-            elif header == 'value' or header == 'min' or header == 'max':
-                try:
-                    param[header] = float(item.text()) if item and item.text() else 0.0
-                except ValueError:
-                    param[header] = 0.0
-            else:
-                param[header] = item.text() if item else ""
-        if 'name' in param and param['name']:
-            model_data["parameters"].append(param)
+        # col 0: Name (必有)
+        name_item = table.item(row, 0)
+        name = name_item.text() if name_item else ""
+        if not name:
+            continue
+
+        # col 1: Comments
+        comments_item = table.item(row, 1)
+        display_name = comments_item.text() if comments_item else ""
+
+        # col 2: Initial_Value
+        value_item = table.item(row, 2)
+        try:
+            value = float(value_item.text()) if value_item and value_item.text() else 0.0
+        except ValueError:
+            value = 0.0
+
+        param = {
+            "name": name,
+            "display_name": display_name,
+            "value": value,
+            "unit": "",
+        }
+
+        if is_full:
+            # 7 列 fit 模式: 从 col 4/5 读 min/max
+            max_item = table.item(row, 4)
+            min_item = table.item(row, 5)
+            try:
+                param["max"] = float(max_item.text()) if max_item and max_item.text() else 0.0
+            except ValueError:
+                param["max"] = 0.0
+            try:
+                param["min"] = float(min_item.text()) if min_item and min_item.text() else 0.0
+            except ValueError:
+                param["min"] = 0.0
+        else:
+            # 3 列 simu 模式: 从隐藏字典取 min/max/unit
+            bound = hidden.get(name, {})
+            try:
+                param["min"] = float(bound.get('min', 0)) if bound.get('min') not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                param["min"] = 0.0
+            try:
+                param["max"] = float(bound.get('max', 0)) if bound.get('max') not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                param["max"] = 0.0
+            param["unit"] = bound.get('unit', "")
+
+        model_data["parameters"].append(param)
 
     return model_data
 
@@ -117,6 +162,13 @@ def load_ecm_model_to_ui(obj, model_data):
     参数:
         obj: UI对象
         model_data: dict, ECM模型的JSON数据
+
+    说明(Bug #006 Phase 2.5):
+        根据当前 ECMtable 的列数自适应写入:
+        - 7 列 (fit 模式): 写入全部 7 列(Name/Comments/Initial/Fitted/Max/Min/Error)
+        - 3 列 (simu 模式): 只写入前 3 列(Name/Comments/Initial);min/max 持久化到
+          `obj._ecm_param_bounds` 隐藏字典,这样在 simu 模式下加载一个含 min/max 的
+          JSON 模型时,虽然表内不显示,但仍能在 roundtrip 时保留边界信息。
     """
     circuit_string = model_data.get("circuit_string", "")
     obj.tab1.connectionTextEdit.setText(circuit_string)
@@ -130,33 +182,45 @@ def load_ecm_model_to_ui(obj, model_data):
 
     table = obj.tab1.ECMtable
     table.setRowCount(0)
-    headers = ['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Fixed', 'Error [%]']
-    table.setColumnCount(len(headers))
-    table.setHorizontalHeaderLabels(headers)
+
+    # Bug #006 Phase 2.5: 根据当前表头列数决定写入策略
+    # 7 列 (fit) = 完整加载; 3 列 (simu) = 隐藏持久化 min/max
+    ncols = table.columnCount()
+    is_full = ncols >= 7
+    # 初始化隐藏持久化字典
+    if not hasattr(obj, '_ecm_param_bounds') or obj._ecm_param_bounds is None:
+        obj._ecm_param_bounds = {}
 
     for param in model_data.get("parameters", []):
         row = table.rowCount()
         table.insertRow(row)
 
-        name_item = QTableWidgetItem(param.get("name", ""))
-        comments_item = QTableWidgetItem(param.get("display_name", ""))
-        value_item = QTableWidgetItem(str(param.get("value", "")))
-        unit_item = QTableWidgetItem(param.get("unit", ""))
-        max_item = QTableWidgetItem(str(param.get("max", "")))
-        min_item = QTableWidgetItem(str(param.get("min", "")))
-        fixed_checkbox = QTableWidgetItem()
-        fixed_checkbox.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
-        fixed_checkbox.setCheckState(Qt.CheckState.Checked if param.get("fixed", False) else Qt.CheckState.Unchecked)
-        error_item = QTableWidgetItem("")
+        name = param.get("name", "")
+        display_name = param.get("display_name", "")
+        value = param.get("value", "")
+        max_v = param.get("max", "")
+        min_v = param.get("min", "")
 
-        table.setItem(row, 0, name_item)
-        table.setItem(row, 1, comments_item)
-        table.setItem(row, 2, value_item)
-        table.setItem(row, 3, QTableWidgetItem(""))
-        table.setItem(row, 4, max_item)
-        table.setItem(row, 5, min_item)
-        table.setItem(row, 6, fixed_checkbox)
-        table.setItem(row, 7, error_item)
+        # col 0: Name (必有)
+        table.setItem(row, 0, QTableWidgetItem(name))
+        # col 1: Comments (必有)
+        table.setItem(row, 1, QTableWidgetItem(display_name))
+        # col 2: Initial_Value (必有)
+        table.setItem(row, 2, QTableWidgetItem(str(value)))
+
+        if is_full:
+            # 7 列 fit 模式: 写入 Fitted_Value(3)/Max(4)/Min(5)/Error(6)
+            table.setItem(row, 3, QTableWidgetItem(""))  # Fitted_Value - 初始空
+            table.setItem(row, 4, QTableWidgetItem(str(max_v)))
+            table.setItem(row, 5, QTableWidgetItem(str(min_v)))
+            table.setItem(row, 6, QTableWidgetItem(""))  # Error - 初始空
+        else:
+            # 3 列 simu 模式: 把 min/max 存入隐藏字典, 不在表内显示
+            obj._ecm_param_bounds[name] = {
+                'min': min_v,
+                'max': max_v,
+                'unit': param.get("unit", ""),
+            }
 
 
 # =============================================================================
@@ -311,8 +375,8 @@ class ECMFunction:
         self.option = {'EP': 0, 'DC Conductivity': 0}
         self.tab1.connectionTextEdit.setText('')
         self.tab1.ECMtable.setRowCount(0)
-        self.tab1.ECMtable.setColumnCount(8)
-        self.tab1.ECMtable.setHorizontalHeaderLabels(['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Fixed', 'Error [%]'])
+        # Bug #006 Phase 2: 移除 Fixed 死列,通过 setECMTableHeader('fit') 统一重置为 7 列
+        self.tab1.setECMTableHeader('fit')
         self.tab1.ECMtable.setShowGrid(True)
 
     def _get_model_folder(self):

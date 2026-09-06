@@ -62,27 +62,40 @@ def create_mt_model_json(obj):
     # 构建parameters列表，直接从表格读取，保证未拟合时也能保存当前参数
     parameters = []
     table = obj.tab2.MTtable
+    # Bug #006 Phase 2.5: 根据 MTtable 列数自适应读取
+    # 7 列 (fit): 读 col 4 (Max) / col 5 (Min)
+    # 3 列 (simu): 表内无 Min/Max, 从 obj._mt_param_bounds 隐藏字典取
+    ncols = table.columnCount()
+    is_full = ncols >= 7
+    hidden = getattr(obj, '_mt_param_bounds', None) or {}
     for row in range(table.rowCount()):
         name_item = table.item(row, 0)
-        init_item = table.item(row, 2)
-        max_item = table.item(row, 4)
-        min_item = table.item(row, 5)
         if not name_item or not name_item.text():
             continue
+        name = name_item.text()
+        init_item = table.item(row, 2)
         try:
             init_val = float(init_item.text()) if init_item and init_item.text() else 0.0
         except ValueError:
             init_val = 0.0
-        try:
-            max_val = float(max_item.text()) if max_item and max_item.text() else None
-        except ValueError:
-            max_val = None
-        try:
-            min_val = float(min_item.text()) if min_item and min_item.text() else None
-        except ValueError:
-            min_val = None
+        if is_full:
+            max_item = table.item(row, 4)
+            min_item = table.item(row, 5)
+            try:
+                max_val = float(max_item.text()) if max_item and max_item.text() else None
+            except ValueError:
+                max_val = None
+            try:
+                min_val = float(min_item.text()) if min_item and min_item.text() else None
+            except ValueError:
+                min_val = None
+        else:
+            # 3 列 simu 模式: 表内无 min/max, 从隐藏字典取
+            bound = hidden.get(name, {})
+            min_val = bound.get('min', None)
+            max_val = bound.get('max', None)
         parameters.append({
-            "name": name_item.text(),
+            "name": name,
             "init": init_val,
             "min": min_val,
             "max": max_val
@@ -118,7 +131,14 @@ def load_mt_model_to_ui(obj, model_data):
             - MTexpre: 表达式列表 (会被修改)
             - MTparams: lmfit Parameters 对象 (会被修改)
             - option: 选项字典 (会被修改)
+            - _mt_param_bounds: (可选) Bug #006 Phase 2.5 simu 隐藏持久化字典
         model_data: dict, MT模型的JSON数据
+
+    说明(Bug #006 Phase 2.5):
+        根据当前 MTtable 的列数自适应写入:
+        - 7 列 (fit 模式): 写入全部 7 列(Name/Comments/Initial/Fitted/Max/Min/Error)
+        - 3 列 (simu 模式): 只写入前 3 列(Name/Comments/Initial);min/max 持久化到
+          `obj._mt_param_bounds` 隐藏字典
     """
     try:
         # 1. 清空当前模型数据
@@ -144,6 +164,12 @@ def load_mt_model_to_ui(obj, model_data):
         # 4. 清空表格
         obj.tab2.MTtable.setRowCount(0)
 
+        # Bug #006 Phase 2.5: 初始化隐藏持久化字典
+        if not hasattr(obj, '_mt_param_bounds') or obj._mt_param_bounds is None:
+            obj._mt_param_bounds = {}
+        ncols = obj.tab2.MTtable.columnCount()
+        is_full = ncols >= 7
+
         # 5. 加载parameters到MTparams和表格
         if 'parameters' in model_data:
             for param in model_data['parameters']:
@@ -152,7 +178,7 @@ def load_mt_model_to_ui(obj, model_data):
                 max_val = param.get('max', 1e15)
                 min_val = param.get('min', 1e-15)
 
-                # 添加到MTparams
+                # 添加到MTparams(始终保留 min/max, 因为 lmfit Parameter 需要)
                 obj.MTparams.add(name, value=init_val, min=min_val, max=max_val)
 
                 # 添加到表格
@@ -160,8 +186,18 @@ def load_mt_model_to_ui(obj, model_data):
                 obj.tab2.MTtable.setRowCount(currentRow + 1)
                 obj.tab2.MTtable.setItem(currentRow, 0, QTableWidgetItem(name))
                 obj.tab2.MTtable.setItem(currentRow, 2, QTableWidgetItem(str(init_val)))
-                obj.tab2.MTtable.setItem(currentRow, 4, QTableWidgetItem(str(max_val)))
-                obj.tab2.MTtable.setItem(currentRow, 5, QTableWidgetItem(str(min_val)))
+                if is_full:
+                    # 7 列 fit 模式: 写入 Fitted(3)/Max(4)/Min(5)/Error(6)
+                    obj.tab2.MTtable.setItem(currentRow, 3, QTableWidgetItem(""))
+                    obj.tab2.MTtable.setItem(currentRow, 4, QTableWidgetItem(str(max_val)))
+                    obj.tab2.MTtable.setItem(currentRow, 5, QTableWidgetItem(str(min_val)))
+                    obj.tab2.MTtable.setItem(currentRow, 6, QTableWidgetItem(""))
+                else:
+                    # 3 列 simu 模式: 把 min/max 存入隐藏字典
+                    obj._mt_param_bounds[name] = {
+                        'min': min_val,
+                        'max': max_val,
+                    }
 
         # 6. 加载model_terms
         if 'model_terms' in model_data:
@@ -440,17 +476,26 @@ class MTMFunction:
             self.tab2.MTmultitermTextEdit.setText('')
 
     def tableAdd(self, name, init_val, max_val, min_val):
-        """表格添加行"""
+        """表格添加行(Bug #006 Phase 2.5: 自适应 3/7 列表)"""
         currentRow = self.tab2.MTtable.rowCount()
         self.tab2.MTtable.setRowCount(currentRow + 1)
         MTnewitem = QTableWidgetItem(name)
         self.tab2.MTtable.setItem(currentRow, 0, MTnewitem)
         MTinit_val = QTableWidgetItem(str(init_val))
         self.tab2.MTtable.setItem(currentRow, 2, MTinit_val)
-        MTmax_val = QTableWidgetItem(str(max_val))
-        self.tab2.MTtable.setItem(currentRow, 4, MTmax_val)
-        MTmin_val = QTableWidgetItem(str(min_val))
-        self.tab2.MTtable.setItem(currentRow, 5, MTmin_val)
+        # Bug #006 Phase 2.5: 根据当前表头列数决定 max/min 写入策略
+        ncols = self.tab2.MTtable.columnCount()
+        if ncols >= 7:
+            # 7 列 fit 模式: 写入 Max(4)/Min(5)
+            MTmax_val = QTableWidgetItem(str(max_val))
+            self.tab2.MTtable.setItem(currentRow, 4, MTmax_val)
+            MTmin_val = QTableWidgetItem(str(min_val))
+            self.tab2.MTtable.setItem(currentRow, 5, MTmin_val)
+        else:
+            # 3 列 simu 模式: max/min 存入隐藏字典
+            if not hasattr(self, '_mt_param_bounds') or self._mt_param_bounds is None:
+                self._mt_param_bounds = {}
+            self._mt_param_bounds[name] = {'min': min_val, 'max': max_val}
 
     def tableDelete(self, namelist):
         """表格删除行"""

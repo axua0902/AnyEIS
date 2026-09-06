@@ -127,10 +127,9 @@ class Simu(ECMFunction, MTMFunction, PyTabWidget2):
         self.ms_modelitemsnamelist = []  # 存储带序号的MS模型文件名列表
         self.current_ms_model_path = None  # 当前MS模型文件路径
 
-        # 重置 Simulation 表格表头（使用ECUI提供的统一方法）
+        # 重置 Simulation 表格表头（使用ECUI/MTMUI提供的统一方法）
         self.tab1.setECMTableHeader('simu')
-        self.tab2.MTtable.setColumnCount(6)
-        self.tab2.MTtable.setHorizontalHeaderLabels(['Name', 'Comments', 'Initial_Value', 'Max', 'Min', 'Fixed'])
+        self.tab2.setMTMTableHeader('simu')
 
 
     def sendsignal(self ,outputlist ,plotdataname ,plotdata ,message4):
@@ -204,11 +203,11 @@ class Simu(ECMFunction, MTMFunction, PyTabWidget2):
     def clearECCalculation(self):
         """
         清空 ECM 最近一次 Calculate 投递给 Figure 的仿真数据（计算行 Clear 按钮槽）。
-        保留模型结构（circuit、params、connectionTextEdit、ECMtable 全部 6 列均为用户输入）。
+        保留模型结构（circuit、params、connectionTextEdit、ECMtable 全部 3 列均为用户输入）。
 
-        说明:Simulation 路径下 ECMtable 由 setECMTableHeader('simu') 初始化为 6 列
-        (Name/Comments/Initial_Value/Max/Min/Fixed),无 Fitted_Value / Error [%] 等
-        计算结果列,故本方法只需清空全局 plot 副本,不动表格。
+        说明:Simulation 路径下 ECMtable 由 setECMTableHeader('simu') 初始化为 3 列
+        (Name/Comments/Initial_Value),无 Fitted_Value / Error [%] / Fixed / Max / Min
+        等计算结果列,故本方法只需清空全局 plot 副本,不动表格。
         """
         # 清空全局 plot 副本（仅清仿真期追加的部分；原始数据由导入流程维护）
         try:
@@ -335,11 +334,11 @@ class Simu(ECMFunction, MTMFunction, PyTabWidget2):
         """
         清空 MT 最近一次 Calculate 投递给 Figure 的仿真数据（计算行 Clear 按钮槽）。
         保留模型结构（modelterm、termnamelist、MTexpre、MTparams、option、MTmultitermTextEdit、
-        MTtable 全部 6 列均为用户输入、EP/DC 勾选）。
+        MTtable 全部 3 列均为用户输入、EP/DC 勾选）。
 
-        说明:Simulation 路径下 MTtable 由 setColumnCount(6) 初始化为 6 列
-        (Name/Comments/Initial_Value/Max/Min/Fixed),无 Fitted_Value / Error [%] 等
-        计算结果列,故本方法只需清空全局 plot 副本,不动表格。
+        说明:Simulation 路径下 MTtable 由 setMTMTableHeader('simu') 初始化为 3 列
+        (Name/Comments/Initial_Value),无 Fitted_Value / Error [%] / Fixed / Max / Min
+        等计算结果列,故本方法只需清空全局 plot 副本,不动表格。
         """
         # 清空全局 plot 副本
         try:

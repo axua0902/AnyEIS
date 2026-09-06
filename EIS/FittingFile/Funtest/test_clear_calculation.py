@@ -8,7 +8,7 @@ test_clear_calculation.py
   * `clearECCalculation`：清空 ECM 最近一次 Calculate 的输出，但保留模型结构
   * `clearMTCalculation`：清空 MT 最近一次 Calculate 的输出，但保留模型结构
 
-B-1 合约(Fitting 路径,8 列表格):
+B-1 合约(Fitting 路径,7 列表格 — Bug #006 Phase 2 移除 Fixed 死列后):
   ┌──────────────────────────────┬────────────┬────────────┐
   │ 对象                          │ B-1 是否清 │ 是否保留   │
   ├──────────────────────────────┼────────────┼────────────┤
@@ -17,9 +17,9 @@ B-1 合约(Fitting 路径,8 列表格):
   │ 全局 plotdata / plotdataname   │ ✓ 清空     │ -          │
   │ 全局 outputlist               │ ✓ 清空     │ -          │
   │ table col=3 (Fitted_Value)    │ ✓ 清空     │ -          │
-  │ table col=7 (Error [%])       │ ✓ 清空     │ -          │
-  │ table col=0,1,2,4,5,6         │ -          │ ✓ 保留     │
-  │ (Name/Comments/Initial/Max/Min/Fixed)              │        │
+  │ table col=6 (Error [%])       │ ✓ 清空     │ -          │
+  │ table col=0,1,2,4,5           │ -          │ ✓ 保留     │
+  │ (Name/Comments/Initial/Max/Min)              │        │
   │ self.circuit / self.params    │ -          │ ✓ 保留     │
   │ self.termnamelist / modelterm │ -          │ ✓ 保留     │
   │ connectionTextEdit /          │ -          │ ✓ 保留     │
@@ -27,7 +27,7 @@ B-1 合约(Fitting 路径,8 列表格):
   │ EP / DC 勾选                   │ -          │ ✓ 保留     │
   └──────────────────────────────┴────────────┴────────────┘
 
-Simulation 路径(6 列表格,无 Fitted_Value / Error [%] 列):
+Simulation 路径(5 列表格,无 Fitted_Value / Error [%] / Fixed 列):
   * 表格完全不动(所有列均为用户输入)
   * 只清空全局 plot 副本
 
@@ -111,28 +111,27 @@ def qapp():
     yield app
 
 
-def _build_8col_table(qapp, fitted_filled=True):
-    """构造一个 8 列 MTtable(Fitting 路径),可选填充拟合结果列。"""
+def _build_7col_table(qapp, fitted_filled=True):
+    """构造一个 7 列 MTtable(Fitting 路径,Bug #006 Phase 2 后无 Fixed),可选填充拟合结果列。"""
     from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
     mt = QTableWidget()
-    mt.setColumnCount(8)
+    mt.setColumnCount(7)
     mt.setHorizontalHeaderLabels(
-        ['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Fixed', 'Error [%]']
+        ['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Error [%]']
     )
     mt.setRowCount(2)
-    for row, (name, init_v, max_v, min_v, fixed) in enumerate(
-        [('R1', '100.0', '1e6', '1e-9', 'False'),
-         ('C1', '1e-6', '1e-3', '1e-15', 'True')]
+    for row, (name, init_v, max_v, min_v) in enumerate(
+        [('R1', '100.0', '1e6', '1e-9'),
+         ('C1', '1e-6', '1e-3', '1e-15')]
     ):
         mt.setItem(row, 0, QTableWidgetItem(name))
         mt.setItem(row, 1, QTableWidgetItem('comment'))
         mt.setItem(row, 2, QTableWidgetItem(init_v))
         if fitted_filled:
             mt.setItem(row, 3, QTableWidgetItem('99.5'))   # 拟合结果
-            mt.setItem(row, 7, QTableWidgetItem('0.5'))     # 误差
+            mt.setItem(row, 6, QTableWidgetItem('0.5'))     # 误差
         mt.setItem(row, 4, QTableWidgetItem(max_v))
         mt.setItem(row, 5, QTableWidgetItem(min_v))
-        mt.setItem(row, 6, QTableWidgetItem(fixed))
     return mt
 
 
@@ -174,8 +173,8 @@ class TestClearECCalculation:
         assert fitting_mod.plotdataname == []
         assert fitting_mod.outputlist == []
 
-    def test_clears_ecm_table_columns_3_and_7_only(self):
-        """只清 Fitted_Value(3) / Error [%](7) 列,不清 Fixed(6)。"""
+    def test_clears_ecm_table_columns_3_and_6_only(self):
+        """Bug #006 Phase 2: 7 列表格,只清 Fitted_Value(3) / Error [%](6) 列。"""
         from EIS.FittingFile.Fitting import Fitting
         obj = _make_fitting_like_mock()
 
@@ -187,9 +186,9 @@ class TestClearECCalculation:
 
         Fitting.clearECCalculation(obj)
 
-        # 应只清 3/7 列;每个 row 调一次,所以 3 行 × 2 列 = 6 次
-        assert sorted(set(cleared_cols)) == [3, 7], (
-            "ECMtable 应只清 col 3(Fitted_Value)和 col 7(Error [%]),实际: %r"
+        # 应只清 3/6 列;每个 row 调一次,所以 3 行 × 2 列 = 6 次
+        assert sorted(set(cleared_cols)) == [3, 6], (
+            "ECMtable 应只清 col 3(Fitted_Value)和 col 6(Error [%]),实际: %r"
             % (sorted(set(cleared_cols)),)
         )
         assert obj.tab1.ECMtable.setItem.call_count == 3 * 2, (
@@ -213,7 +212,7 @@ class TestClearECCalculation:
         obj.tab1.connectionTextEdit.clear.assert_not_called()
 
     def test_preserves_ecm_table_all_user_input_columns(self):
-        """Name(0)/Comments(1)/Initial_Value(2)/Max(4)/Min(5)/Fixed(6) 列不应被 setItem。"""
+        """Bug #006 Phase 2: Name(0)/Comments(1)/Initial_Value(2)/Max(4)/Min(5) 列不应被 setItem。"""
         from EIS.FittingFile.Fitting import Fitting
         obj = _make_fitting_like_mock()
 
@@ -224,10 +223,10 @@ class TestClearECCalculation:
 
         Fitting.clearECCalculation(obj)
 
-        forbidden = {0, 1, 2, 4, 5, 6}  # 含 Fixed(6),用户输入不能动
+        forbidden = {0, 1, 2, 4, 5}  # 用户输入列
         used = set(cleared_cols)
         assert used.isdisjoint(forbidden), (
-            "不应清 Name/Comments/Initial_Value/Max/Min/Fixed 列,实际访问: %r"
+            "不应清 Name/Comments/Initial_Value/Max/Min 列,实际访问: %r"
             % (sorted(used & forbidden),)
         )
 
@@ -263,7 +262,7 @@ class TestClearMTCalculation:
         assert fitting_mod.plotdataname == []
         assert fitting_mod.outputlist == []
 
-    def test_clears_mt_table_columns_3_and_7_only(self):
+    def test_clears_mt_table_columns_3_and_6_only(self):
         from EIS.FittingFile.Fitting import Fitting
         obj = _make_fitting_like_mock()
 
@@ -274,8 +273,8 @@ class TestClearMTCalculation:
 
         Fitting.clearMTCalculation(obj)
 
-        assert sorted(set(cleared_cols)) == [3, 7], (
-            "MTtable 应只清 col 3(Fitted_Value)和 col 7(Error [%]),"
+        assert sorted(set(cleared_cols)) == [3, 6], (
+            "MTtable 应只清 col 3(Fitted_Value)和 col 6(Error [%]),"
             "实际: %r" % (sorted(set(cleared_cols)),)
         )
         assert obj.tab2.MTtable.setItem.call_count == 3 * 2
@@ -301,7 +300,7 @@ class TestClearMTCalculation:
         obj.tab2.DCcheckBox.setChecked.assert_not_called()
 
     def test_preserves_mt_table_all_user_input_columns(self):
-        """Name(0)/Comments(1)/Initial_Value(2)/Max(4)/Min(5)/Fixed(6) 列不应被 setItem。"""
+        """Name(0)/Comments(1)/Initial_Value(2)/Max(4)/Min(5) 列不应被 setItem。"""
         from EIS.FittingFile.Fitting import Fitting
         obj = _make_fitting_like_mock()
 
@@ -312,10 +311,10 @@ class TestClearMTCalculation:
 
         Fitting.clearMTCalculation(obj)
 
-        forbidden = {0, 1, 2, 4, 5, 6}
+        forbidden = {0, 1, 2, 4, 5}
         used = set(cleared_cols)
         assert used.isdisjoint(forbidden), (
-            "不应清 Name/Comments/Initial_Value/Max/Min/Fixed 列,实际访问: %r"
+            "不应清 Name/Comments/Initial_Value/Max/Min 列,实际访问: %r"
             % (sorted(used & forbidden),)
         )
 
@@ -324,7 +323,7 @@ class TestClearMTCalculation:
 # 测试 simulation.py 中的同名方法
 # ---------------------------------------------------------------------------
 class TestSimulationClearMethods:
-    """simulation.py 没有 fitteddata/fittedresults,只清全局 plot 副本,不动 6 列表。"""
+    """simulation.py 没有 fitteddata/fittedresults,只清全局 plot 副本,不动 5 列表。"""
 
     def test_simulation_clearECCalculation_preserves_model(self):
         from EIS.SimulationFile.simulation import Simu
@@ -340,7 +339,7 @@ class TestSimulationClearMethods:
         obj.tab1.connectionTextEdit.setText.assert_not_called()
 
     def test_simulation_clearECCalculation_does_not_touch_ecm_table(self):
-        """Simulation 路径下 ECMtable 6 列无计算结果列,完全不动。"""
+        """Simulation 路径下 ECMtable 5 列无计算结果列,完全不动。"""
         from EIS.SimulationFile.simulation import Simu
         obj = _make_fitting_like_mock()
 
@@ -366,7 +365,7 @@ class TestSimulationClearMethods:
         obj.tab2.DCcheckBox.setChecked.assert_not_called()
 
     def test_simulation_clearMTCalculation_does_not_touch_mt_table(self):
-        """Simulation 路径下 MTtable 6 列无计算结果列,完全不动。"""
+        """Simulation 路径下 MTtable 5 列无计算结果列,完全不动。"""
         from EIS.SimulationFile.simulation import Simu
         obj = _make_fitting_like_mock()
 
@@ -384,12 +383,12 @@ class TestSimulationClearMethods:
 class TestRealTableIntegration:
     """用真实 QTableWidget 验证 clear 后能再次 Calculate(关键回归场景)。"""
 
-    def test_Fitting_clearMTCalculation_on_8col_preserves_all_user_input(self, qapp):
-        """Fitting 路径 8 列 MTtable:clear 后 Name/Comments/Initial/Max/Min/Fixed 全保留。"""
+    def test_Fitting_clearMTCalculation_on_7col_preserves_all_user_input(self, qapp):
+        """Fitting 路径 7 列 MTtable(Bug #006 Phase 2 后):clear 后 Name/Comments/Initial/Max/Min 全保留。"""
         from EIS.FittingFile.Fitting import Fitting
         from types import SimpleNamespace
 
-        mt = _build_8col_table(qapp, fitted_filled=True)
+        mt = _build_7col_table(qapp, fitted_filled=True)
         obj = SimpleNamespace(
             fitteddata=['x'], fittedresults=['y'], resultsdataInfo=['z'],
             tab2=SimpleNamespace(MTtable=mt),
@@ -397,8 +396,8 @@ class TestRealTableIntegration:
 
         Fitting.clearMTCalculation(obj)
 
-        # 验证 8 列结构未变
-        assert mt.columnCount() == 8, f"columnCount 应保持 8,实际 {mt.columnCount()}"
+        # 验证 7 列结构未变
+        assert mt.columnCount() == 7, f"columnCount 应保持 7,实际 {mt.columnCount()}"
         assert mt.rowCount() == 2, f"rowCount 应保持 2,实际 {mt.rowCount()}"
 
         # 保留所有用户输入列
@@ -408,24 +407,23 @@ class TestRealTableIntegration:
             assert mt.item(row, 2).text() in ('100.0', '1e-6'), f"row{row} Initial_Value 被误清"
             assert mt.item(row, 4).text() in ('1e6', '1e-3'), f"row{row} Max 被误清"
             assert mt.item(row, 5).text() in ('1e-9', '1e-15'), f"row{row} Min 被误清"
-            assert mt.item(row, 6).text() in ('False', 'True'), f"row{row} Fixed 被误清"
 
         # 清空计算结果列
         for row in range(2):
             assert mt.item(row, 3).text() == '', f"row{row} Fitted_Value 应清空"
-            assert mt.item(row, 7).text() == '', f"row{row} Error [%] 应清空"
+            assert mt.item(row, 6).text() == '', f"row{row} Error [%] 应清空"
 
-    def test_Fitting_clearECCalculation_on_8col_preserves_Fixed(self, qapp):
-        """Fitting 路径 8 列 ECMtable:clear 后 Fixed 列保留(关键回归)。"""
+    def test_Fitting_clearECCalculation_on_7col_preserves_user_input(self, qapp):
+        """Fitting 路径 7 列 ECMtable(Bug #006 Phase 2 后):clear 后用户输入列保留(回归保护)。"""
         from EIS.FittingFile.Fitting import Fitting
         from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
         from types import SimpleNamespace
 
-        # 构造 8 列 ECMtable
+        # 构造 7 列 ECMtable
         ecm = QTableWidget()
-        ecm.setColumnCount(8)
+        ecm.setColumnCount(7)
         ecm.setHorizontalHeaderLabels(
-            ['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Fixed', 'Error [%]']
+            ['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Error [%]']
         )
         ecm.setRowCount(1)
         ecm.setItem(0, 0, QTableWidgetItem('R1'))
@@ -434,8 +432,7 @@ class TestRealTableIntegration:
         ecm.setItem(0, 3, QTableWidgetItem('99.5'))   # 拟合结果
         ecm.setItem(0, 4, QTableWidgetItem('1e6'))
         ecm.setItem(0, 5, QTableWidgetItem('1e-9'))
-        ecm.setItem(0, 6, QTableWidgetItem('False'))  # Fixed:用户输入
-        ecm.setItem(0, 7, QTableWidgetItem('0.5'))
+        ecm.setItem(0, 6, QTableWidgetItem('0.5'))     # Error
 
         obj = SimpleNamespace(
             fitteddata=['x'], fittedresults=['y'], resultsdataInfo=['z'],
@@ -444,38 +441,37 @@ class TestRealTableIntegration:
 
         Fitting.clearECCalculation(obj)
 
-        # Fixed 列必须保留(回归 Bug #005 第二轮)
-        assert ecm.item(0, 6).text() == 'False', (
-            "ECMtable Fixed 列被误清!实际: %r" % ecm.item(0, 6).text()
-        )
+        # 用户输入列必须保留
+        assert ecm.item(0, 0).text() == 'R1', "Name 列被误清"
+        assert ecm.item(0, 1).text() == 'comment', "Comments 列被误清"
+        assert ecm.item(0, 2).text() == '100.0', "Initial_Value 列被误清"
+        assert ecm.item(0, 4).text() == '1e6', "Max 列被误清"
+        assert ecm.item(0, 5).text() == '1e-9', "Min 列被误清"
         # 拟合结果列已清空
         assert ecm.item(0, 3).text() == '', "Fitted_Value 应清空"
-        assert ecm.item(0, 7).text() == '', "Error [%] 应清空"
+        assert ecm.item(0, 6).text() == '', "Error [%] 应清空"
 
-    def test_simulation_clearMTCalculation_on_6col_does_nothing_to_table(self, qapp):
-        """Simulation 路径 6 列 MTtable:clear 完全不动表格(所有列都是用户输入)。"""
+    def test_simulation_clearMTCalculation_on_3col_does_nothing_to_table(self, qapp):
+        """Simulation 路径 3 列 MTtable(Bug #006 Phase 2.5 后):clear 完全不动表格(所有列都是用户输入)。"""
         from EIS.SimulationFile.simulation import Simu
         from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
         from types import SimpleNamespace
 
-        # 构造 6 列 MTtable(simulation 路径)
+        # 构造 3 列 MTtable(simulation 路径,Phase 2.5 移除 Max/Min)
         mt = QTableWidget()
-        mt.setColumnCount(6)
-        mt.setHorizontalHeaderLabels(['Name', 'Comments', 'Initial_Value', 'Max', 'Min', 'Fixed'])
+        mt.setColumnCount(3)
+        mt.setHorizontalHeaderLabels(['Name', 'Comments', 'Initial_Value'])
         mt.setRowCount(2)
-        for row, (name, init_v, max_v, min_v, fixed) in enumerate(
-            [('R1', '100.0', '1e6', '1e-9', 'False'),
-             ('C1', '1e-6', '1e-3', '1e-15', 'True')]
+        for row, (name, init_v) in enumerate(
+            [('R1', '100.0'),
+             ('C1', '1e-6')]
         ):
             mt.setItem(row, 0, QTableWidgetItem(name))
             mt.setItem(row, 1, QTableWidgetItem('comment'))
             mt.setItem(row, 2, QTableWidgetItem(init_v))
-            mt.setItem(row, 3, QTableWidgetItem(max_v))
-            mt.setItem(row, 4, QTableWidgetItem(min_v))
-            mt.setItem(row, 5, QTableWidgetItem(fixed))
 
         # 记录 clear 前状态
-        before = [[mt.item(r, c).text() if mt.item(r, c) else '' for c in range(6)]
+        before = [[mt.item(r, c).text() if mt.item(r, c) else '' for c in range(3)]
                   for r in range(2)]
 
         obj = SimpleNamespace(
@@ -485,14 +481,14 @@ class TestRealTableIntegration:
         Simu.clearMTCalculation(obj)
 
         # 表格完全不变
-        after = [[mt.item(r, c).text() if mt.item(r, c) else '' for c in range(6)]
+        after = [[mt.item(r, c).text() if mt.item(r, c) else '' for c in range(3)]
                  for r in range(2)]
         assert before == after, (
-            "Simulation 路径 clearMTCalculation 不应改动 6 列 MTtable.\n"
+            "Simulation 路径 clearMTCalculation 不应改动 3 列 MTtable.\n"
             f"before={before}\nafter={after}"
         )
-        # 关键:列数保持 6(不能因 setItem 越界而自动扩展)
-        assert mt.columnCount() == 6, f"columnCount 应保持 6,实际 {mt.columnCount()}"
+        # 关键:列数保持 3(不能因 setItem 越界而自动扩展)
+        assert mt.columnCount() == 3, f"columnCount 应保持 3,实际 {mt.columnCount()}"
 
 
 # ---------------------------------------------------------------------------
@@ -538,28 +534,44 @@ class TestSignalConnections:
             "Fitting.py 仍残留旧的 clearCalculation 定义,应已替换为 clearECCalculation"
         )
 
-    def test_clear_uses_cleared_cols_3_7_not_including_6(self):
-        """回归保护:确认 clear 槽不再清 col=6(Fixed 用户输入)。"""
+    def test_clear_uses_cleared_cols_3_6(self):
+        """Bug #006 Phase 2 回归保护:Fitting 路径 clear 槽应清 col=3,6(7 列表格)。"""
         from EIS.FittingFile import Fitting
         from EIS.SimulationFile import simulation
 
-        # Fitting 两个槽都不应包含 setItem(..., 6, ...) 模式
+        # Fitting 路径:7 列表格,应清 (3, 6) 列
         fitting_src = open(Fitting.__file__, 'r', encoding='utf-8').read()
-        simu_src = open(simulation.__file__, 'r', encoding='utf-8').read()
+        for method in ('clearECCalculation', 'clearMTCalculation'):
+            start = fitting_src.find(f'def {method}')
+            if start == -1:
+                continue
+            end = fitting_src.find('\n    def ', start + 1)
+            if end == -1:
+                end = len(fitting_src)
+            body = fitting_src[start:end]
+            assert '(3, 6)' in body, (
+                f"Fitting.{method} 应使用 cleared_cols=(3, 6) 清 7 列表格"
+            )
+            # 不应再含 (3, 7)(原 8 列表格假设)
+            assert '(3, 7)' not in body, (
+                f"Fitting.{method} 仍含 (3, 7) — 已切换为 7 列表格,应改为 (3, 6)"
+            )
 
-        # 简单字符串扫描:在 clearECCalculation / clearMTCalculation 函数体中不应出现 col 6
-        # 提取每个函数体并检查
-        for name, src in [('Fitting', fitting_src), ('simulation', simu_src)]:
-            for method in ('clearECCalculation', 'clearMTCalculation'):
-                start = src.find(f'def {method}')
-                if start == -1:
-                    continue
-                # 找下一个 def 或 class 结束
-                end = src.find('\n    def ', start + 1)
-                if end == -1:
-                    end = len(src)
-                body = src[start:end]
-                # 在函数体中不应有 (3, 6, 7) 这样的 cleared_cols 元组
-                assert '(3, 6, 7)' not in body, (
-                    f"{name}.{method} 仍含 (3, 6, 7) — 不能清 col 6 (Fixed 用户输入)"
-                )
+        # Simulation 路径:5 列表格,clear 方法不应动表(本就不写 cleared_cols)
+        simu_src = open(simulation.__file__, 'r', encoding='utf-8').read()
+        for method in ('clearECCalculation', 'clearMTCalculation'):
+            start = simu_src.find(f'def {method}')
+            if start == -1:
+                continue
+            end = simu_src.find('\n    def ', start + 1)
+            if end == -1:
+                end = len(simu_src)
+            body = simu_src[start:end]
+            # 5 列 simu 模式:不应含 cleared_cols(原 6/8 列表格遗留)
+            assert 'cleared_cols' not in body, (
+                f"Simulation.{method} 仍含 cleared_cols — 5 列表格无需清列"
+            )
+            # 不应再含 (3, 7)(原 8 列表格假设)
+            assert '(3, 7)' not in body, (
+                f"Simulation.{method} 仍含 (3, 7) — 应已删除"
+            )

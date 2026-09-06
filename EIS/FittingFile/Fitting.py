@@ -480,9 +480,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         """
         清空 ECM 最近一次 Calculate 的输出（计算行 Clear 按钮槽）。
         保留模型结构（circuit、termnamelist、modelterm、connectionTextEdit、ECMtable 行及
-        Name/Comments/Initial_Value/Max/Min/Fixed 列），
+        Name/Comments/Initial_Value/Max/Min 列），
         只清空 fitteddata / fittedresults / resultsdataInfo、全局 plot 副本，以及 ECMtable
-        的 Fitted_Value(3) / Error [%](7) 列。
+        的 Fitted_Value(3) / Error [%](6) 列。
         """
         # 清空拟合输出缓存
         self.fitteddata = list()
@@ -498,10 +498,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         except Exception:
             pass
 
-        # 清空 ECMtable 的 Fitted_Value(3) / Error [%](7) 列
-        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5) / Fixed(6)
-        # 注意:Fixed 是用户输入的"是否固定参数"标志,不能误清
-        cleared_cols = (3, 7)
+        # Bug #006 Phase 2: 7 列表格,只清 Fitted_Value(3) / Error [%](6) 列
+        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5)
+        cleared_cols = (3, 6)
         for row in range(self.tab1.ECMtable.rowCount()):
             for col in cleared_cols:
                 self.tab1.ECMtable.setItem(row, col, QTableWidgetItem(""))
@@ -512,9 +511,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         """
         清空 MT 最近一次 Calculate 的输出（计算行 Clear 按钮槽）。
         保留模型结构（modelterm、termnamelist、MTmultitermTextEdit、MTtable 行及
-        Name/Comments/Initial_Value/Max/Min/Fixed 列、EP/DC 勾选），
+        Name/Comments/Initial_Value/Max/Min 列、EP/DC 勾选），
         只清空 fitteddata / fittedresults / resultsdataInfo、全局 plot 副本，以及 MTtable
-        的 Fitted_Value(3) / Error [%](7) 列。
+        的 Fitted_Value(3) / Error [%](6) 列。
         """
         # 清空拟合输出缓存
         self.fitteddata = list()
@@ -530,10 +529,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         except Exception:
             pass
 
-        # 清空 MTtable 的 Fitted_Value(3) / Error [%](7) 列
-        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5) / Fixed(6)
-        # 注意:Fixed 是用户输入的"是否固定参数"标志,不能误清
-        cleared_cols = (3, 7)
+        # Bug #006 Phase 2: 7 列表格,只清 Fitted_Value(3) / Error [%](6) 列
+        # 保留 Name(0) / Comments(1) / Initial_Value(2) / Max(4) / Min(5)
+        cleared_cols = (3, 6)
         for row in range(self.tab2.MTtable.rowCount()):
             for col in cleared_cols:
                 self.tab2.MTtable.setItem(row, col, QTableWidgetItem(""))
@@ -719,17 +717,18 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
             print(f"[processECMResults]   已写入拟合值到表格")
 
             # 获取stderr并计算误差百分比
+            # Bug #006 Phase 3: 非 least_squares 算法 stderr 为 None 时,显示 'N/A' 而非 NaN
             param = fit_result.params[paramsname]
             stderr = param.stderr
             if stderr is None:
-                errbartemp = float('nan')
-                print(f"[processECMResults]   stderr=None, 误差设置为nan")
+                err_str = 'N/A'
+                print(f"[processECMResults]   stderr=None, 误差显示 N/A")
             else:
-                errbartemp = 100 * round(stderr / param.value, 4)
-                print(f"[processECMResults]   stderr={stderr}, 误差={errbartemp}%")
+                err_str = 100 * round(stderr / param.value, 4)
+                print(f"[processECMResults]   stderr={stderr}, 误差={err_str}%")
 
-            # 写入误差到第7列(Error [%])
-            self.ECMtableWrite(paramsname, errbartemp, 7)
+            # Bug #006 Phase 2: Error [%] 列已从 col 7 移至 col 6(0-indexed),与 7 列表头对齐
+            self.ECMtableWrite(paramsname, err_str, 6)
             print(f"[processECMResults]   已写入误差到表格")
 
         # 注意：整体拟合效果表格由 FittingSetRes.py 的getsingal 信号处理
@@ -785,15 +784,16 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
             self.MTtableWrite(paramsname, fitted_val, 3)
 
             # 获取stderr并计算误差百分比
+            # Bug #006 Phase 3: 非 least_squares 算法 stderr 为 None 时,显示 'N/A' 而非 NaN
             param = fit_result.params[paramsname]
             stderr = param.stderr
             if stderr is None:
-                errbartemp = float('nan')
+                err_str = 'N/A'
             else:
-                errbartemp = 100 * round(stderr / param.value, 4)
+                err_str = 100 * round(stderr / param.value, 4)
 
-            # 写入误差到第7列(Error [%])
-            self.MTtableWrite(paramsname, errbartemp, 7)
+            # Bug #006 Phase 2: Error [%] 列已从 col 7 移至 col 6(0-indexed),与 7 列表头对齐
+            self.MTtableWrite(paramsname, err_str, 6)
 
     def MTtableWrite(self, name, value, col):
         """

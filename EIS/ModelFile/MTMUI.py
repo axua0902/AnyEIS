@@ -472,18 +472,15 @@ class Tab2Content(QWidget):
         self.parameterSectionLayout.addWidget(self.equationRow)
 
         ##################Results Table############
-        label=['Name', 'Comments', 'Initial_Value','Fitted_Value','Max','Min','Fixed','Error [%]']
         self.MTtable = QTableWidget()
         self.MTtable.setRowCount(0)
-        self.MTtable.setColumnCount(len(label))
         self.MTtable.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.MTtable.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.MTtable.setHorizontalHeaderLabels(label)
         self.MTtable.resizeColumnsToContents()
         # 每列增加20像素的宽松间距
-        for i in range(len(label)):
-            self.MTtable.setColumnWidth(i, self.MTtable.columnWidth(i) + 9)
         self.MTtable.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # 通过 setMTMTableHeader('fit') 统一初始化表头（Bug #006 Phase 1 架构对称）
+        self.setMTMTableHeader('fit')
         self.MTtable.horizontalHeader().setStyleSheet("""
             QHeaderView::section {
                 font-weight: 700;
@@ -532,6 +529,38 @@ class Tab2Content(QWidget):
         self.parameterSectionLayout.addWidget(self.calculationRow)
 
         self.verticalLayout.addWidget(self.parameterSection)
+
+    def setMTMTableHeader(self, mode='fit'):
+        """
+        设置MTM表格的表头
+
+        参数:
+            mode: 'fit' 表示拟合模式，'simu' 表示仿真模式
+
+        列结构（Bug #006 Phase 2 移除 Fixed 死列, Phase 2.5 simu 进一步移除 Max/Min）:
+            fit 模式 (7 列): Name, Comments, Initial_Value, Fitted_Value, Max, Min, Error [%]
+            simu 模式 (3 列): Name, Comments, Initial_Value
+
+        说明:
+            Simulation 路径下仿真算法只读 col 0 (Name) + col 2 (Initial_Value),
+            Max/Min 是 Fitting 的边界约束, simu 无意义,故移除以减少 UI 噪音。
+            若需要持久化 Max/Min, 由 `load_mt_model_to_ui` / `create_mt_model_json`
+            通过 `obj._mt_param_bounds` 隐藏字典做 roundtrip。
+        """
+        if mode == 'fit':
+            # 拟合模式：显示拟合值和误差
+            label = ['Name', 'Comments', 'Initial_Value', 'Fitted_Value', 'Max', 'Min', 'Error [%]']
+        else:
+            # 仿真模式：只保留仿真算法真正读取的列(Name/Comments/Initial_Value)
+            # 不显示拟合值、误差、Max/Min 与已删除的 Fixed 死列
+            label = ['Name', 'Comments', 'Initial_Value']
+
+        self.MTtable.setColumnCount(len(label))
+        self.MTtable.setHorizontalHeaderLabels(label)
+        # 每列增加9像素的宽松间距(保持与原硬编码 setup 行为一致)
+        self.MTtable.resizeColumnsToContents()
+        for i in range(len(label)):
+            self.MTtable.setColumnWidth(i, self.MTtable.columnWidth(i) + 9)
 
     def setup_button_hover_effect(self, button):
         """Setup hover animation effect for a button"""
