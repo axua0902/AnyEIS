@@ -49,7 +49,7 @@
 **发现的问题**：
 | # | 问题 | 严重性 | 详情 |
 |---|------|--------|------|
-| 2.1.1 | 依赖 Qt UI 框架 | 中 | Line 45-55 测试 UI 文本框 → kwargs 转换，但 `pyqtgraph`、`PyQt5` 在 Embedded 模式可能未安装 |
+| 2.1.1 | 依赖 Qt UI 框架 | 中 | Line 45-55 测试 UI 文本框 → kwargs 转换，但 `pyqtgraph`、`PySide6` 在 Embedded 模式可能未安装 |
 | 2.1.2 | report_fit 输出刷屏 | 低 | 默认 `verbose=True` 时打印大量 lmfit 内部信息，影响日志可读性 |
 | 2.1.3 | auto_fitting 异常防护缺失 | 中 | 没有 `try/except` 包裹单方法测试，1 个方法异常会让全部后续方法无法运行 |
 

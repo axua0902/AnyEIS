@@ -374,7 +374,7 @@ class Ui_RightColumn(object):
 
     def on_export_preferences(self):
         parent_widget = QApplication.activeWindow()
-        default_path = os.path.join(os.getcwd(), "AnyEIS_preferences.json")
+        default_path = os.path.join(os.getcwd(), "User_preferences.json")
         file_path, _ = QFileDialog.getSaveFileName(
             parent_widget,
             "Export User Preferences",

@@ -54,7 +54,7 @@ def emit_warning(message, level='warning', title=None):
     # GUI 环境: 弹窗
     try:
         # 延迟导入, 避免在非 GUI 环境报错
-        from PyQt5.QtWidgets import QMessageBox
+        from PySide6.QtWidgets import QMessageBox
         if level == 'critical':
             box_func = QMessageBox.critical
         elif level == 'info':
@@ -66,7 +66,7 @@ def emit_warning(message, level='warning', title=None):
                        QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
         return ret == QMessageBox.StandardButton.Ok
     except ImportError:
-        # 无 PyQt5: 回退到控制台
+        # 无 PySide6: 回退到控制台
         prefix = {'info': 'ℹ️', 'warning': '⚠️ ', 'critical': '❌'}.get(level, '⚠️ ')
         print(f"\n{prefix} [{title}]")
         print(f"  {message}\n")

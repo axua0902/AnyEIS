@@ -237,7 +237,7 @@ class Ui_LeftSetting(object):
         <hr>
         <p><b>Dependencies:</b><br>
         PySide6 &gt;= 6.5.0, numpy &gt;= 1.24.0, pandas &gt;= 2.0.0,<br>
-        matplotlib &gt;= 3.7.0, xlsxwriter &gt;= 3.1.0, lmfit &gt;= 1.2.0,<br>
+        matplotlib &gt;= 3.7.0, openpyxl &gt;= 3.1.0, lmfit &gt;= 1.2.0,<br>
         schemdraw &gt;= 0.18.0, scipy &gt;= 1.10.0, mpmath &gt;= 1.3.0</p>
         """
         msg_box = QMessageBox()

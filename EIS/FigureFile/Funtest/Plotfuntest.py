@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Created on Tue Aug  4 16:31:29 2020
 
@@ -7,7 +7,7 @@ Created on Tue Aug  4 16:31:29 2020
 
 
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 import matplotlib.pyplot as plt
 
 from numpy import log10,real,imag,array,angle,absolute,pi,sqrt,log,tanh,arctanh
@@ -18,7 +18,7 @@ from EIS.FigureFile.Figurefun import EISfiguremaker,writeanydata,creatanyfile,EP
 
 
 import sys
-# from Plottest_pyqt5 import MyMplCanvasPyQt5, create_academic_canvas, save_publication_figure, setup_academic_style
+# from Plottest_pyside6 import MyMplCanvasPySide6, create_academic_canvas, save_publication_figure, setup_academic_style
 
 
 
@@ -27,12 +27,12 @@ import sys
 current_file_path = os.path.abspath(__file__)
 proj_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(current_file_path))))
 
-# 验证项目根目录文件夹名字中是否包含"AnyEIS"（不区分大小写）
+# 验证项目根目录文件夹名字中是否包含 "AnyEIS"（不区分大小写）
 proj_folder_name = os.path.basename(proj_path)
 if "anyeis" not in proj_folder_name.lower():
-    print(f"错误：项目根目录文件夹名字 '{proj_folder_name}' 中不包含 'AnyEIS'")
+    print(f"错误：项目根目录文件夹名 '{proj_folder_name}' 中不包含 'AnyEIS'")
     print(f"当前项目路径：{proj_path}")
-    print("请确保项目位于包含'AnyEIS'的文件夹中")
+    print("请确保项目位于包含 'AnyEIS' 的文件夹中")
     sys.exit(1)
 else:
     pass
@@ -58,7 +58,7 @@ fileslist = fileslist_filtered
 filepath = [path + "\\" + i for i in fileslist]
 
 
-# ################读取参考数据######################
+# ################读取参考数据#####################
 # refdata=list()
 # refdataname=list()
 
@@ -73,7 +73,7 @@ filepath = [path + "\\" + i for i in fileslist]
 # refdatanametemp,refdatatemp=readfile(filepath[17])
 # refdata.append(refdatatemp[0])
 # refdataname.append(refdatanametemp[0])
-# ################读取参考数据######################
+# ################读取参考数据#####################
 
 # ################读取数据######################
 # data=list()
@@ -108,7 +108,6 @@ for i in range(0,len(filepath)):
 
 
 
-
 ##################测试绘图函数########################
 # 确保QApplication实例存在
 if QApplication.instance() is None:
@@ -121,7 +120,7 @@ else:
 num_datasets = min(3, len(prodata))  # 最多选择3个数据集
 outputlist = [1] * num_datasets + [0] * (len(prodata) - num_datasets)
 
-print(f"测试数据集数量: {len(prodata)}")
+print(f"测试数据集数量：{len(prodata)}")
 print(f"选择绘制的数据集: {num_datasets}")
 print(f"输出列表: {outputlist[:5]}...")  # 显示前5个元素
 
@@ -129,7 +128,7 @@ print(f"输出列表: {outputlist[:5]}...")  # 显示前5个元素
 print("\n=== 测试1: 单个图形绘制 ===")
 canvas1 = create_academic_canvas(width=10, height=6, dpi=150)
 
-# 创建主窗口1
+# 创建主窗口
 main_window1 = QMainWindow()
 main_window1.setWindowTitle('EIS Plot Test - Single Plot')
 main_window1.setGeometry(100, 100, 1000, 600)
@@ -152,7 +151,7 @@ main_window1.show()
 print("\n=== 测试2: 完整4图布局 ===")
 canvas2 = create_academic_canvas(width=12, height=10, dpi=150)
 
-# 创建主窗口2
+# 创建主窗口
 main_window2 = QMainWindow()
 main_window2.setWindowTitle('EIS Plot Test - Complete Layout')
 main_window2.setGeometry(150, 150, 1200, 800)
@@ -174,7 +173,7 @@ main_window2.show()
 print("\n=== 测试3: 介电常数图形 ===")
 canvas3 = create_academic_canvas(width=10, height=8, dpi=150)
 
-# 创建主窗口3
+# 创建主窗口
 main_window3 = QMainWindow()
 main_window3.setWindowTitle('EIS Plot Test - Permittivity')
 main_window3.setGeometry(200, 200, 1000, 700)
@@ -200,9 +199,9 @@ except Exception as e:
 
 # 测试4: 测试个别图形方法
 print("\n=== 测试4: 个别图形方法测试 ===")
-canvas4 = MyMplCanvasPyQt5(width=8, height=6, dpi=100)
+canvas4 = MyMplCanvasPySide6(width=8, height=6, dpi=100)
 
-# 创建主窗口4
+# 创建主窗口
 main_window4 = QMainWindow()
 main_window4.setWindowTitle('EIS Plot Test - Individual Methods')
 main_window4.setGeometry(250, 250, 800, 600)
@@ -223,24 +222,6 @@ print("\n=== 所有测试完成 ===")
 print("已创建4个测试窗口，图形已保存到Results文件夹")
 
 # 运行应用程序
-app.exec_()
+app.exec()
 
 ##################测试绘图函数########################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

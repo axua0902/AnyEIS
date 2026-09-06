@@ -16,6 +16,10 @@
 
 ---
 
+> **本次维护记录(2026-09-05 会话)**: 已确认当前文档结构与历史归档一致,本次会话未发现新问题;所有 TP 系列与 Bug 系列条目状态保持上一归档汇总(13 已修复 / 2 已解决 / 2 复审或降级 / 3 不修复)。如后续维护中发现新缺陷,请按下方模板追加。
+
+---
+
 ## 二、新问题记录模板
 
 ```markdown
@@ -75,7 +79,27 @@
 | TP-017 | RF 三方法 note | 🟢 轻微 | 缺方法功能说明 | ✅ 已补充(ℹ 行) |
 | TP-018 | `ui_ThreeSolution` / `ui_TransmissionLine` | 🟡 中等 | 浓度未联动 ref 液类型 | ✅ 已修复(`_apply_ref_solution_rules`) |
 
-**汇总**: 18 个条目 — ✅ 13 已修复 / ✅ 2 已解决 / 🟢 2 复审撤销或降级 / ⏸️ 3 不修复(已记录理由)。**无未决问题**。
+### MT 系列 — 项目维护与一致性(2026-09-05 会话)
+
+| ID | 范围 | 严重度 | 一句话 | 状态 |
+|----|------|--------|--------|------|
+| MT-001 | 协议声明 | 🟡 中等 | `README.md` + UI 信息中许可证从 MIT 改为 Apache 2.0 | ✅ 已完成 |
+| MT-002 | UI 元数据 | 🟢 轻微 | `ui_left_setting.py` `about_info` 版权年份与发布日期更新 | ✅ 已完成 |
+| MT-003 | 依赖版本 | 🟡 中等 | UI/文档依赖列表与 `requirements.txt` 精度对齐(三位小数) | ✅ 已完成 |
+| MT-004 | 用户偏好 | 🟡 中等 | 默认导出文件名由 `AnyEIS_preferences.json` 改为 `User_preferences.json` | ✅ 已完成 |
+| MT-005 | 依赖清单 | 🔴 严重 | 主程序运行时使用 `openpyxl` 读取 xlsx,但 `requirements.txt` 未声明 | ✅ 已补充 |
+| MT-006 | Qt 框架 | 🟡 中等 | 测试代码残留 `PyQt5` 引用,迁移至 `PySide6`(含 `app.exec()` 语法) | ✅ 已完成 |
+
+**MT 详情**：
+
+- **MT-001** — 修改 `README.md`(L84)、`GUI/columns/ui_left_column.py`(L155)、`GUI/columns/ui_left_setting.py`(L227) 三处 `MIT License` 链接/文本 → `Apache License 2.0`(`https://www.apache.org/licenses/LICENSE-2.0`)。
+- **MT-002** — `ui_left_setting.py` `about_info`:版权年份 `2023-2025` → `2023-2026`(L226);发布日期 `2025-06-26` → `2026.09.01`(L235)。
+- **MT-003** — `ui_left_setting.py`(L238-L242) 版本号统一为三位小数格式(`>= 6.5.0` / `>= 1.24.0` / `>= 2.0.0` / `>= 3.7.0` / `>= 1.2.0` / `>= 0.18.0` / `>= 1.10.0` / `>= 1.3.0`),HTML 中 `>` 转义为 `&gt;`;与 `requirements.txt` 内容一致。
+- **MT-004** — `GUI/columns/ui_right_column.py`(L377):`default_path` 由 `AnyEIS_preferences.json` 改为 `User_preferences.json`;函数 `export_user_preferences` / `import_user_preferences` 命名已对齐。
+- **MT-005** — `requirements.txt` 新增 `openpyxl>=3.1.0` 与说明注释;同步追加到 `README.md`、`ui_left_setting.py`、`ui_left_column.py` 依赖展示。
+- **MT-006** — `EIS/FittingFile/FittingWarnings.py`(L57, L69) 与 `EIS/FigureFile/Funtest/Plotfuntest.py`(L10, L21, L203, L226) 全部 `PyQt5` → `PySide6`,`app.exec_()` → `app.exec()`,类名 `MyMplCanvasPyQt5` → `MyMplCanvasPySide6`;同步报告文档 `Funtest_Run_Issues_Summary.md`(L51) 引用更新。
+
+**汇总**: Bug/TP 系列 18 个条目 — ✅ 13 已修复 / ✅ 2 已解决 / 🟢 2 复审撤销或降级 / ⏸️ 3 不修复(已记录理由);MT 系列 6 个条目全部 ✅ 已完成。**无未决问题**。
 
 ---
 
@@ -90,6 +114,7 @@
 | 2026-09-03 | R1 | `DieMat` 函数 | TP-009, TP-011, TP-016 修复(6 个问题决策) |
 | 2026-09-04 | R2 | RF 系列 + UI 联动 | TP-014, TP-015, TP-017, TP-018 修复 |
 | 2026-09-05 | — | 文档重组 | BUGS.md → update.md(归档已处理项) |
+| 2026-09-05 | MT | 协议 / 元数据 / 依赖 / Qt 框架 | MT-001 ~ MT-006:Apache 2.0、版本号对齐、openpyxl 补充、PyQt5→PySide6 |
 
 ---
 

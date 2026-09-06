@@ -32,7 +32,7 @@
  * `NumPy (>=1.24.0)`, `SciPy (>=1.10.0)`, `pandas (>=2.0.0)`, `mpmath (>=1.3.0)`
  * `Matplotlib (>=3.7.0)`, `schemdraw (>=0.18.0)`
  * `lmfit (>=1.2.0)`
- * `PySide6 (>=6.5.0)`, `xlsxwriter (>=3.1.0)`
+ * `openpyxl (>=3.1.0)`, `xlsxwriter (>=3.1.0)`
 
 ## Installation
 

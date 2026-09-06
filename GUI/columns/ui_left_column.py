@@ -165,7 +165,7 @@ class Ui_LeftColumn(object):
         self.label_tech.setText(QCoreApplication.translate(
             "LeftColumn",
             u"Dependencies: PySide6 >= 6.5, numpy >= 1.24, pandas >= 2.0, "
-            u"matplotlib >= 3.7, xlsxwriter >= 3.1, lmfit >= 1.2, "
+            u"matplotlib >= 3.7, openpyxl >= 3.1, lmfit >= 1.2, "
             u"schemdraw >= 0.18, scipy >= 1.10, mpmath >= 1.3",
             None
         ))
