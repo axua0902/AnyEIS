@@ -151,28 +151,27 @@ class Ui_LeftColumn(object):
         ))
         self.label_copyright.setText(QCoreApplication.translate(
             "LeftColumn",
-            u"© 2023-2025 AnyEIS Authors. All rights reserved.<br>"
+            u"© 2020-2026 AnyEIS Authors. All rights reserved.<br>"
             u'<a href="https://www.apache.org/licenses/LICENSE-2.0">License: Apache License 2.0</a>',
             None
         ))
         self.label_contact.setText(QCoreApplication.translate(
             "LeftColumn",
-            u'<a href="https://anyeis.org">Official Website: https://anyeis.org</a><br>'
-            u'Support Email: support@anyeis.org<br>'
-            u'<a href="https://github.com/zhan9013/AnyEIS">GitHub: github.com/zhan9013/AnyEIS</a>',
+            u'Support Email: zhan234@outlook.com<br>'
+            u'<a href="https://github.com/axua0902/AnyEIS">GitHub: github.com/axua0902/AnyEIS</a>',
             None
         ))
         self.label_tech.setText(QCoreApplication.translate(
             "LeftColumn",
-            u"Dependencies: PySide6 >= 6.5, numpy >= 1.24, pandas >= 2.0, "
-            u"matplotlib >= 3.7, openpyxl >= 3.1, lmfit >= 1.2, "
-            u"schemdraw >= 0.18, scipy >= 1.10, mpmath >= 1.3",
+            u"Dependencies: PySide6 >= 6.5.0, numpy >= 1.24.0, pandas >= 2.0.0, "
+            u"matplotlib >= 3.7.0, openpyxl >= 3.1.0, lmfit >= 1.2.0, "
+            u"schemdraw >= 0.18.0, scipy >= 1.10.0, mpmath >= 1.3.0",
             None
         ))
         self.label_contribution.setText(QCoreApplication.translate(
             "LeftColumn",
-            u"Contributors: Zhang San, Li Si, Wang Wu<br>"
-            u"Developer: AnyEIS Authors \nRelease Date: 2025-06-26<br>"
+            u"Contributors: Zhang An<br>"
+            u"Developer: AnyEIS Authors \nRelease Date: 2026.09.01<br>"
             u"Acknowledgements: Thanks to all testers and community supporters.<br>",
             None
         ))
