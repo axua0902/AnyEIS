@@ -1,0 +1,43 @@
+{
+    "version": "1.0",
+    "model_type": "ECM",
+    "model_name": "ECM_Circuit",
+    "file_path": "E:/Research/AnyEIS/AnyEIS4_test/ModelFileExamples/ECM_Circuit.json",
+    "created_date": "2026-05-30",
+    "frequency": {
+        "min": 10.0,
+        "max": 1000000000.0,
+        "points": 50,
+        "unit": "Hz"
+    },
+    "circuit_string": "R1+p(R2,C2)",
+    "parameters": [
+        {
+            "name": "R1",
+            "display_name": "",
+            "value": 1.0,
+            "unit": "",
+            "min": 0.0,
+            "max": 0.0,
+            "fixed": false
+        },
+        {
+            "name": "R2",
+            "display_name": "",
+            "value": 10.0,
+            "unit": "",
+            "min": 0.0,
+            "max": 0.0,
+            "fixed": false
+        },
+        {
+            "name": "C2",
+            "display_name": "",
+            "value": 1e-05,
+            "unit": "",
+            "min": 0.0,
+            "max": 0.0,
+            "fixed": false
+        }
+    ]
+}
