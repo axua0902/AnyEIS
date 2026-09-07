@@ -269,166 +269,209 @@ def userdefine2(self):
 
 
 
+def _reset_figure_state(self):
+    """
+    彻底清理 figure 残留状态:
+    - 移除所有 axes
+    - clf() 清空 figure
+    - 重置 layout engine,防止 constrained_layout/tight_layout 把单 subplot 切成多列
+    - draw_idle() + flush_events() 强制刷新 UI
+    - 删除 Plotfun 在 MplCanvas 上可能残留的 axes 引用(axRs/axNyquist/...),
+      防止下次绘图复用旧的 stale 坐标轴
+    """
+    fig = self.mpl.fig
+    for ax in list(fig.axes):
+        ax.remove()
+    fig.clf()
+    try:
+        fig.set_layout_engine('none')
+    except Exception:
+        pass
+    self.mpl.draw_idle()
+    try:
+        self.mpl.flush_events()
+    except Exception:
+        pass
+    for stale_attr in ('axRs', 'axbodeX', 'axPhy', 'axNyquist',
+                       'axEps', 'axSigma', 'axColeCole', 'axTheta',
+                       'axEpsIM', 'axSigmaIM'):
+        if hasattr(self.mpl, stale_attr):
+            try:
+                delattr(self.mpl, stale_attr)
+            except Exception:
+                pass
+
+
+def _iter_processed_synthetic(self):
+    """
+    遍历 plotdata 中的有效条目,跳过 original 配对,
+    只保留 processed synthetic(避免原始曲线与处理曲线完全重叠)。
+    注意:不按 id() 去重,同一对的 original 与 synthetic 是不同的 DataFrame 对象,
+    仅靠 self.message[i]['synthetic'] 即可完成筛选。
+    """
+    for i, data in enumerate(self.plotdata):
+        if data is None:
+            continue
+        info = self.message[i] if i < len(self.message) else {}
+        is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
+        if not is_synthetic:
+            continue
+        yield data, self.plotdataname[i], self.outputlist[i]
+
+
 def userdefine3(self):
     """数据处理方法1：数据平滑处理和异常值检测"""
     if not self.plotdata or not self.outputlist:
         QMessageBox.warning(self, "Warning", "No data available for processing!")
         return
-        
-    print("=== UserDefine2: Data Smoothing & Outlier Detection ===")
+
+    print("=== UserDefine3: Data Smoothing & Outlier Detection ===")
     print(f"Original data count: {len(self.plotdata)}")
     print(f"Selected data: {self.outputlist}")
     print(f"Data names: {self.plotdataname}")
-    
+
     try:
         # 创建处理后的数据列表
         processed_data = []
         processed_names = []
         processed_selection = []
-        
-        for i, (data, name, selected) in enumerate(zip(self.plotdata, self.plotdataname, self.outputlist)):
-            if selected == 1 and data is not None:
-                # 获取数据列名
-                colnames = list(data.columns)
-                processed_df = data.copy()
-                
-                # 方法1：移动平均平滑处理
-                window_size = min(5, len(data))  # 窗口大小不超过数据长度
-                if len(colnames) > 1:
-                    # 对数值列进行平滑处理
-                    for col in colnames[1:]:  # 跳过第一列（通常是频率）
-                        if processed_df[col].dtype in ['float64', 'int64']:
-                            processed_df[col] = processed_df[col].rolling(
-                                window=window_size, center=True, min_periods=1
-                            ).mean()
-                
-                # 异常值检测和处理（使用IQR方法）
-                for col in colnames[1:]:
+
+        for data, name, selected in _iter_processed_synthetic(self):
+            if selected != 1:
+                continue
+
+            colnames = list(data.columns)
+            processed_df = data.copy()
+
+            # 方法1：移动平均平滑处理
+            window_size = min(5, len(data))  # 窗口大小不超过数据长度
+            if len(colnames) > 1:
+                for col in colnames[1:]:  # 跳过第一列（通常是频率）
                     if processed_df[col].dtype in ['float64', 'int64']:
-                        Q1 = processed_df[col].quantile(0.25)
-                        Q3 = processed_df[col].quantile(0.75)
-                        IQR = Q3 - Q1
-                        lower_bound = Q1 - 1.5 * IQR
-                        upper_bound = Q3 + 1.5 * IQR
-                        
-                        # 将异常值替换为边界值
-                        processed_df[col] = processed_df[col].clip(lower_bound, upper_bound)
-                
-                processed_data.append(processed_df)
-                processed_names.append(f"{name}_Smoothed")
-                processed_selection.append(1)
-                
-                print(f"Processed: {name} -> {name}_Smoothed")
-        
+                        processed_df[col] = processed_df[col].rolling(
+                            window=window_size, center=True, min_periods=1
+                        ).mean()
+
+            # 异常值检测和处理（使用IQR方法）
+            for col in colnames[1:]:
+                if processed_df[col].dtype in ['float64', 'int64']:
+                    Q1 = processed_df[col].quantile(0.25)
+                    Q3 = processed_df[col].quantile(0.75)
+                    IQR = Q3 - Q1
+                    lower_bound = Q1 - 1.5 * IQR
+                    upper_bound = Q3 + 1.5 * IQR
+                    processed_df[col] = processed_df[col].clip(lower_bound, upper_bound)
+
+            processed_data.append(processed_df)
+            processed_names.append(f"{name}_Smoothed")
+            processed_selection.append(1)
+
+            print(f"Processed: {name} -> {name}_Smoothed")
+
         if processed_data:
-            # 使用处理后的数据绘图
-            self.clearfigure()
-            
-            # 根据数据类型选择合适的绘图方法
+            _reset_figure_state(self)
+
             data_type = self.figuregui.datatypeComboBox.currentText()
-            
-            if data_type == 'f-Z,Phy,Rs,X':
-                # 绘制阻抗数据的Nyquist图
+
+            if data_type == 'f-Z,Phase,Re(Z),Im(Z)':
                 self.mpl.plotNyquist(processed_selection, processed_names, processed_data, 111)
             elif data_type == 'f-Epsilon,Sigma':
-                # 绘制介电数据的Cole-Cole图
                 self.mpl.plotColeCole(processed_selection, processed_names, processed_data, 111)
             else:
-                # 通用绘图
                 self.mpl.plotNormal(processed_selection, processed_names, processed_data, 111)
-            
+
             print("Data smoothing and outlier detection completed!")
-            QMessageBox.information(self, "Success", 
+            QMessageBox.information(self, "Success",
                 f"Data processing completed!\nProcessed {len(processed_data)} datasets with smoothing and outlier detection.")
         else:
             QMessageBox.warning(self, "Warning", "No valid data selected for processing!")
-            
+
     except Exception as e:
-        print(f"Error in userdefine2: {e}")
+        print(f"Error in userdefine3: {e}")
         QMessageBox.critical(self, "Error", f"Data processing failed: {str(e)}")
-    
+
     return
 
 
 def userdefine4(self):
     """数据处理方法2：数据归一化和频率范围筛选"""
-    
+
     if not self.plotdata or not self.outputlist:
         QMessageBox.warning(self, "Warning", "No data available for processing!")
         return
-        
-    print("=== UserDefine3: Data Normalization & Frequency Filtering ===")
+
+    print("=== UserDefine4: Data Normalization & Frequency Filtering ===")
     print(f"Original data count: {len(self.plotdata)}")
     print(f"Selected data: {self.outputlist}")
     print(f"Data names: {self.plotdataname}")
-    
+
     try:
         # 创建处理后的数据列表
         processed_data = []
         processed_names = []
         processed_selection = []
-        
-        # 设置频率筛选范围（可根据需要调整）
-        freq_min = 1e-1  # 最小频率 0.1 Hz
-        freq_max = 1e6   # 最大频率 1 MHz
-        
-        for i, (data, name, selected) in enumerate(zip(self.plotdata, self.plotdataname, self.outputlist)):
-            if selected == 1 and data is not None:
-                # 获取数据列名
-                colnames = list(data.columns)
-                processed_df = data.copy()
-                
-                # 方法2a：频率范围筛选
-                if len(colnames) > 0:
-                    freq_col = colnames[0]  # 假设第一列是频率
-                    # 筛选频率范围
+
+        # 频率筛选范围改按每个数据集实际上下界自适应取值,
+        # 避免与 1MHz~3GHz 的实际数据范围错位导致筛选后无数据
+        FREQ_MARGIN = 0.05  # 上下界各留 5% 边距
+
+        for data, name, selected in _iter_processed_synthetic(self):
+            if selected != 1:
+                continue
+
+            colnames = list(data.columns)
+            processed_df = data.copy()
+
+            # 方法2a：按数据集自适应频率范围筛选
+            freq_col = colnames[0] if len(colnames) > 0 else None
+            if freq_col is not None and freq_col in processed_df.columns and len(processed_df) > 0:
+                fmin = float(processed_df[freq_col].min())
+                fmax = float(processed_df[freq_col].max())
+                if fmax > fmin:
+                    freq_min = fmin * (1.0 - FREQ_MARGIN)
+                    freq_max = fmax * (1.0 + FREQ_MARGIN)
                     freq_mask = (processed_df[freq_col] >= freq_min) & (processed_df[freq_col] <= freq_max)
                     processed_df = processed_df[freq_mask].reset_index(drop=True)
-                
-                # 方法2b：数据归一化（Min-Max归一化）
-                for col in colnames[1:]:  # 跳过频率列
-                    if processed_df[col].dtype in ['float64', 'int64'] and len(processed_df) > 0:
-                        col_min = processed_df[col].min()
-                        col_max = processed_df[col].max()
-                        if col_max != col_min:  # 避免除零
-                            processed_df[col] = (processed_df[col] - col_min) / (col_max - col_min)
-                        else:
-                            processed_df[col] = 0  # 如果所有值相同，设为0
-                
-                if len(processed_df) > 0:  # 确保筛选后还有数据
-                    processed_data.append(processed_df)
-                    processed_names.append(f"{name}_Normalized")
-                    processed_selection.append(1)
-                    
-                    print(f"Processed: {name} -> {name}_Normalized (Points: {len(processed_df)})")
-        
+
+            # 方法2b：数据归一化（Min-Max归一化）
+            for col in colnames[1:]:  # 跳过频率列
+                if processed_df[col].dtype in ['float64', 'int64'] and len(processed_df) > 0:
+                    col_min = processed_df[col].min()
+                    col_max = processed_df[col].max()
+                    if col_max != col_min:  # 避免除零
+                        processed_df[col] = (processed_df[col] - col_min) / (col_max - col_min)
+                    else:
+                        processed_df[col] = 0  # 所有值相同时归一化结果置 0
+
+            if len(processed_df) > 0:  # 确保筛选后还有数据
+                processed_data.append(processed_df)
+                processed_names.append(f"{name}_Normalized")
+                processed_selection.append(1)
+
+                print(f"Processed: {name} -> {name}_Normalized (Points: {len(processed_df)})")
+
         if processed_data:
-            # 使用处理后的数据绘图
-            self.clearfigure()
-            
-            # 根据数据类型选择合适的绘图方法
+            _reset_figure_state(self)
+
             data_type = self.figuregui.datatypeComboBox.currentText()
-            
-            if data_type == 'f-Z,Phy,Rs,X':
-                # 绘制阻抗数据的Bode图（实部）
+
+            if data_type == 'f-Z,Phase,Re(Z),Im(Z)':
                 self.mpl.plotRs(processed_selection, processed_names, processed_data, 111)
             elif data_type == 'f-Epsilon,Sigma':
-                # 绘制介电数据的介电常数图
                 self.mpl.plotEps(processed_selection, processed_names, processed_data, 111)
             else:
-                # 通用绘图
                 self.mpl.plotNormal(processed_selection, processed_names, processed_data, 111)
-            
+
             print("Data normalization and frequency filtering completed!")
-            QMessageBox.information(self, "Success", 
-                f"Data processing completed!\nProcessed {len(processed_data)} datasets with normalization and frequency filtering.\nFrequency range: {freq_min} - {freq_max} Hz")
+            QMessageBox.information(self, "Success",
+                f"Data processing completed!\nProcessed {len(processed_data)} datasets with normalization and frequency filtering.")
         else:
             QMessageBox.warning(self, "Warning", "No valid data remained after frequency filtering!")
-            
+
     except Exception as e:
-        print(f"Error in userdefine3: {e}")
+        print(f"Error in userdefine4: {e}")
         QMessageBox.critical(self, "Error", f"Data processing failed: {str(e)}")
-    
+
     return
 
 

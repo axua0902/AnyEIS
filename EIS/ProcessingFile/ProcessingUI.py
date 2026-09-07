@@ -227,12 +227,6 @@ class DataprocessUI(object):
 
         self.processDataSectionLayout.addWidget(self.dynamicContentContainer)
 
-
-
-
-
-
-
         main_layout.addWidget(self.processDataSection)
 
         return self.contents
