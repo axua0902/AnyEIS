@@ -1,0 +1,15 @@
+{
+    "version": "1.0",
+    "model_type": "ECM",
+    "model_name": "New ECM Model 20260904_132552",
+    "file_path": "C:\\Users\\zhang an\\Desktop\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\ModelFileExamples\\ECM\\ECM_20260904_132552.json",
+    "created_date": "2026-09-04",
+    "frequency": {
+        "min": 10.0,
+        "max": 1000000000.0,
+        "points": 50,
+        "unit": "Hz"
+    },
+    "circuit_string": "",
+    "parameters": []
+}
