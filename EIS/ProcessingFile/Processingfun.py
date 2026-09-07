@@ -324,7 +324,7 @@ def DieMatPark(refdata, prodata, params_info):
         params_info (dict): 需含
             - 'solution_parameters' (list[dict]): 长度 N,每个含
                 - 'solution_index' (int): refdata 索引
-                - 'name' (str): 'Air' / 'Water' / 'Ethanol' / 'Alcohol' / 'NaCl'
+                - 'name' (str): 'Air' / 'Water' / 'Ethanol' / 'NaCl'
                 - 'temperature' (float, °C)
                 - 'concentration' (float, mol/L, NaCl 时使用)
 
@@ -381,7 +381,7 @@ def DieMatPark(refdata, prodata, params_info):
         elif name == 'Water':
             eps_water, _ = paraWater(ref_omega)
             eps_known = real(eps_water)
-        elif name in ('Ethanol', 'Alcohol'):
+        elif name == 'Ethanol':
             eps_eth, _ = paraEthanol(ref_omega)
             eps_known = real(eps_eth)
         elif name == 'NaCl':
@@ -390,7 +390,7 @@ def DieMatPark(refdata, prodata, params_info):
         else:
             raise ValueError(
                 f"DieMatPark: 未知标准样品类型 '{name}',"
-                f"支持: Air / Water / Ethanol / Alcohol / NaCl"
+                f"支持: Air / Water / Ethanol / NaCl"
             )
 
         C_meas_list.append(C_meas)
@@ -460,7 +460,7 @@ def threesolutions(refdata, prodata, params_info):
 
     适用场景:
         - 同 DieMat,适用于几何因子未知的电极
-        - 通过三种不同介电常数的参考液 (NaCl、Water、Ethanol/Alcohol、Air 任选三种),利用线性插值关系求 ε_MUT
+        - 通过三种不同介电常数的参考液 (NaCl、Water、Ethanol、Air 任选三种),利用线性插值关系求 ε_MUT
         - 当电极几何/杂散无法用 2 种参考精确求解时,3 种参考可提供过约束,提高鲁棒性
 
     计算思路 (基于双截距线性插值):
@@ -474,7 +474,7 @@ def threesolutions(refdata, prodata, params_info):
         params_info (dict): 需含
             - 'solution_parameters' (list[dict]): 长度 3,每个含
                 - 'solution_index' (int): refdata 索引
-                - 'name' (str): 'NaCl' / 'Water' / 'Ethanol' / 'Alcohol' / 'Air'
+                - 'name' (str): 'NaCl' / 'Water' / 'Ethanol' / 'Air'
                 - 'temperature' (float)
                 - 'concentration' (float, NaCl 时使用,mol/L)
 
@@ -504,7 +504,7 @@ def threesolutions(refdata, prodata, params_info):
     # print(concentration1)
     if sol1_info['name']=='NaCl':
         CalSoleps1,msigmaNaCl1=paraNaCl(Refomega1,temperature1,concentration1)
-    elif sol1_info['name']=='Ethanol' or sol1_info['name']=='Alcohol':
+    elif sol1_info['name']=='Ethanol':
         mepsEthanol,msigmaEthanol=paraEthanol(Refomega1)
         CalSoleps1=mepsEthanol
     elif sol1_info['name']=='Water':
@@ -532,7 +532,7 @@ def threesolutions(refdata, prodata, params_info):
     # print(concentration2)
     if sol2_info['name']=='NaCl':
         CalSoleps2,msigmaNaCl2=paraNaCl(Refomega2,temperature2,concentration2)
-    elif sol2_info['name']=='Ethanol' or sol2_info['name']== 'Alcohol':
+    elif sol2_info['name']=='Ethanol':
         mepsEthanol,msigmaEthanol=paraEthanol(Refomega2)
         CalSoleps2=mepsEthanol
     elif sol2_info['name']=='Water':
@@ -558,7 +558,7 @@ def threesolutions(refdata, prodata, params_info):
     concentration3=float(sol3_info['concentration'])
     if sol3_info['name']=='NaCl':
         CalSoleps3,msigmaNaCl3=paraNaCl(Refomega3,temperature3,concentration3)
-    elif sol3_info['name']=='Ethanol' or sol3_info['name']== 'Alcohol':
+    elif sol3_info['name']=='Ethanol':
         mepsEthanol,msigmaEthanol=paraEthanol(Refomega3)
         CalSoleps3=mepsEthanol
     elif sol3_info['name']=='Water':
@@ -615,7 +615,7 @@ def threesolutions_Y(refdata, prodata, params_info):
     concentration1 = float(sol1_info['concentration'])
     if sol1_info['name']=='NaCl':
         CalSoleps1, _ = paraNaCl(Refomega1, temperature1, concentration1)
-    elif sol1_info['name'] in ('Ethanol', 'Alcohol'):
+    elif sol1_info['name'] == 'Ethanol':
         CalSoleps1, _ = paraEthanol(Refomega1)
     elif sol1_info['name']=='Water':
         CalSoleps1, _ = paraWater(Refomega1)
@@ -634,7 +634,7 @@ def threesolutions_Y(refdata, prodata, params_info):
     concentration2 = float(sol2_info['concentration'])
     if sol2_info['name']=='NaCl':
         CalSoleps2, _ = paraNaCl(Refomega2, temperature2, concentration2)
-    elif sol2_info['name'] in ('Ethanol', 'Alcohol'):
+    elif sol2_info['name'] == 'Ethanol':
         CalSoleps2, _ = paraEthanol(Refomega2)
     elif sol2_info['name']=='Water':
         CalSoleps2, _ = paraWater(Refomega2)
@@ -653,7 +653,7 @@ def threesolutions_Y(refdata, prodata, params_info):
     concentration3 = float(sol3_info['concentration'])
     if sol3_info['name']=='NaCl':
         CalSoleps3, _ = paraNaCl(Refomega3, temperature3, concentration3)
-    elif sol3_info['name'] in ('Ethanol', 'Alcohol'):
+    elif sol3_info['name'] == 'Ethanol':
         CalSoleps3, _ = paraEthanol(Refomega3)
     elif sol3_info['name']=='Water':
         CalSoleps3, _ = paraWater(Refomega3)

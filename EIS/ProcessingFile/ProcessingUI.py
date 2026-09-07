@@ -281,6 +281,7 @@ class DataprocessUI(object):
         self.concentrationLineEdit = {}
         self.concentrationTextEdit = {}
         self.concentrationUnitLineEdit = {}
+        self.ethanolConcentrationComboBox = {}  # Ethanol专用浓度下拉框 (75%/90%)
         self.temperatureLineEdit = {}
         self.temperatureTextEdit = {}
         self.temperatureUnitLineEdit = {}
@@ -429,6 +430,32 @@ class DataprocessUI(object):
         self.concentrationTextEdit[num].setFixedWidth(45)
 
         unitRow2Layout.addWidget(self.concentrationTextEdit[num])
+
+        # [新增] Ethanol 专用浓度下拉框: 只支持 75% / 90% 两个体积分数
+        # (对应 standard_parameter.py 中的 paraAlcohol=75% 和 paraEthanol=90%)
+        # 初始隐藏,仅当 refsoluionComboBox 选中 "Ethanol" 时显示
+        self.ethanolConcentrationComboBox[num] = PyComboBox2(
+            color=self.themes["app_color"]["text_foreground"],
+            radius=4,
+            font_size=self.settings["font"]["text_size_small"],
+            font_weight=600,
+            min_height=30,
+            bg_color=self.themes["app_color"]["input_bg"],
+            bg_color_hover=self.themes["app_color"]["light_three"],
+            bg_color_pressed=self.themes["app_color"]["context_hover"],
+            selection_color=self.themes["app_color"]["context_pressed"],
+            border_color=self.themes["app_color"]["input_border"],
+        )
+        self.ethanolConcentrationComboBox[num].addItems(['90', '75'])
+        self.ethanolConcentrationComboBox[num].setFixedHeight(30)
+        self.ethanolConcentrationComboBox[num].setFixedWidth(55)
+        self.ethanolConcentrationComboBox[num].hide()
+        unitRow2Layout.addWidget(self.ethanolConcentrationComboBox[num])
+
+        # 同步: combo 选择变化时, 同步到 concentrationTextEdit (下游代码读的是它)
+        self.ethanolConcentrationComboBox[num].currentTextChanged.connect(
+            lambda text, n=num: self.concentrationTextEdit[n].setText(text)
+        )
 
         self.concentrationUnitLineEdit[num] = PyLabel2(
             text="mol/L",

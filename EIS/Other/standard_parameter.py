@@ -44,7 +44,9 @@ def paraWater(omega):
 
 
 
-#################     calculate the permittivity of Ethanol    ###########
+#################     calculate the permittivity of Ethanol (90% vol 乙醇水溶液)    ###########
+# 注: Debye 参数对应 95% 体积分数乙醇水溶液的实测数据,
+#     不是 100% 纯乙醇。纯乙醇 ε_s≈24.3,而本函数 ε_s≈24.6,差异源于水组分。
 def paraEthanol(omega):
     stnum=np.size(omega)#
     mepsEthanol=np.ones(stnum,complex)
@@ -71,19 +73,19 @@ def paraEthanol(omega):
         msigmaEthanol[temp]=sigmaEthanol
 
     return mepsEthanol,msigmaEthanol
-    
+
 #################     calculate the permittivity of Ethanol    ###########
 
-#################     calculate the permittivity of Alcohol    ###########
-
+#################     calculate the permittivity of Alcohol (75% vol 乙醇水溶液)    ###########
+# 注: Debye 参数对应 75% 体积分数乙醇水溶液的实测数据,
+#     不是纯乙醇也不是纯甲醇。乙醇-水混合液的 ε_s 随含水量增加而升高。
 def paraAlcohol(omega):
     stnum=np.size(omega)#
     mepsAlcohol=np.ones(stnum,complex)
     msigmaAlcohol=np.ones(stnum,complex)
-    
+
     def funAlcohol(omega):#3CC
    ##########  1929 Debye water #############
-#        epsEthanol=30.81
         epsAlcohol1=25.39
         epsAlcohol2=1.44
         epsAlcohol3=1.28
@@ -95,7 +97,7 @@ def paraAlcohol(omega):
         epsAlcohol=epsAlcohol1/(1+1j*omega*taoAlcohol1)+epsAlcohol2/(1+1j*omega*taoAlcohol2)+epsAlcohol3/(1+1j*omega*taoAlcohol3)+epsAlcoholli
         sigmaAlcohol=1j*omega*epsAlcohol*eps0
         return epsAlcohol,sigmaAlcohol
-    
+
     for temp in range(0,stnum):
         epsAlcohol,sigmaAlcohol=funAlcohol(omega[temp])
         mepsAlcohol[temp]=epsAlcohol
@@ -103,7 +105,6 @@ def paraAlcohol(omega):
 
     return mepsAlcohol,msigmaAlcohol
 #################     calculate the permittivity of Alcohol    ###########
-    
 
 #################     calculate the permittivity of NaCl 0.1mol/L   ###########
 def paraNaCl01(omega):

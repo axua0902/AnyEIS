@@ -95,7 +95,7 @@ import pandas as pd
 
 from EIS.FigureFile.Error_stat import calculate_relative_errors,calculate_statistical_indicators,calculate_single_dataset_statistics
 from EIS.FigureFile.Plotfun import plot_multi_dataset_results, plot_single_dataset_results
-from EIS.Other.standard_parameter import paraNaCl,paraWater,paraAlcohol,paraNaCl01,paraEthanol
+from EIS.Other.standard_parameter import paraNaCl,paraWater,paraNaCl01,paraEthanol
 
 class ParameterInputDialog(QDialog):
     """参数输入对话框"""

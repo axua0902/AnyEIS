@@ -257,7 +257,8 @@ class ProcessingMethodUIs:
 
         规则:
             - "Water"  : 浓度禁用 + 写 0(纯水无浓度概念),单位保持 "mol/L"
-            - "Ethanol": 浓度启用,单位切到 "vol%"(体积分数)
+            - "Ethanol": 显示下拉框,只允许 75% / 90% 两个体积分数,单位 "vol%"
+                         (对应 standard_parameter.py 中 paraAlcohol=75% 和 paraEthanol=90%)
             - 其他      : 浓度启用,单位 "mol/L"
         """
         if num not in self.parent.refsoluionComboBox:
@@ -267,32 +268,45 @@ class ProcessingMethodUIs:
         conc_edit = self.parent.concentrationTextEdit.get(num)
         conc_label = self.parent.concentrationLineEdit.get(num)
         conc_unit = self.parent.concentrationUnitLineEdit.get(num)
+        # Ethanol 专用下拉框 (ProcessingUI.uiUnit 中创建,初始隐藏)
+        eth_combo = self.parent.ethanolConcentrationComboBox.get(num) if hasattr(self.parent, 'ethanolConcentrationComboBox') else None
 
         if sol == 'Water':
             if conc_edit is not None:
                 conc_edit.setText('0')
                 conc_edit.setEnabled(False)
+                conc_edit.show()
             if conc_label is not None:
                 conc_label.setEnabled(False)
             if conc_unit is not None:
                 conc_unit.setEnabled(False)
                 conc_unit.setText('mol/L')
+            if eth_combo is not None:
+                eth_combo.hide()
         elif sol == 'Ethanol':
             if conc_edit is not None:
                 conc_edit.setEnabled(True)
+                conc_edit.hide()  # 隐藏文本框,用下拉框代替
             if conc_label is not None:
                 conc_label.setEnabled(True)
             if conc_unit is not None:
                 conc_unit.setEnabled(True)
                 conc_unit.setText('vol%')
+            if eth_combo is not None:
+                eth_combo.show()
+                # 初始化时把当前下拉框选择同步到文本框 (供下游代码读取)
+                conc_edit.setText(eth_combo.currentText())
         else:  # NaCl 等需要 mol/L 浓度的参考液
             if conc_edit is not None:
                 conc_edit.setEnabled(True)
+                conc_edit.show()
             if conc_label is not None:
                 conc_label.setEnabled(True)
             if conc_unit is not None:
                 conc_unit.setEnabled(True)
                 conc_unit.setText('mol/L')
+            if eth_combo is not None:
+                eth_combo.hide()
 
     def ui_ThreeSolution(self):
         self.parent.freshprocessUI()
