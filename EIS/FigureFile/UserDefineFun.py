@@ -347,14 +347,15 @@ def userdefine3(self):
             window_size = min(5, len(data))  # 窗口大小不超过数据长度
             if len(colnames) > 1:
                 for col in colnames[1:]:  # 跳过第一列（通常是频率）
-                    if processed_df[col].dtype in ['float64', 'int64']:
+                    # 修复 Bug #007 P1-2: is_numeric_dtype 覆盖 float32/int32 等所有数值类型
+                    if pd.api.types.is_numeric_dtype(processed_df[col]):
                         processed_df[col] = processed_df[col].rolling(
                             window=window_size, center=True, min_periods=1
                         ).mean()
 
             # 异常值检测和处理（使用IQR方法）
             for col in colnames[1:]:
-                if processed_df[col].dtype in ['float64', 'int64']:
+                if pd.api.types.is_numeric_dtype(processed_df[col]):
                     Q1 = processed_df[col].quantile(0.25)
                     Q3 = processed_df[col].quantile(0.75)
                     IQR = Q3 - Q1
@@ -435,7 +436,8 @@ def userdefine4(self):
 
             # 方法2b：数据归一化（Min-Max归一化）
             for col in colnames[1:]:  # 跳过频率列
-                if processed_df[col].dtype in ['float64', 'int64'] and len(processed_df) > 0:
+                # 修复 Bug #007 P1-2: is_numeric_dtype 覆盖 float32/int32 等所有数值类型
+                if pd.api.types.is_numeric_dtype(processed_df[col]) and len(processed_df) > 0:
                     col_min = processed_df[col].min()
                     col_max = processed_df[col].max()
                     if col_max != col_min:  # 避免除零
@@ -477,77 +479,97 @@ def userdefine4(self):
 
 def userdefine5(self):
     """数据误差计算：多数据集相对误差分析或单数据集内部统计误差"""
-    
+
     if not self.plotdata or not self.outputlist:
         QMessageBox.warning(self, "Warning", "No data available for processing!")
         return
-        
+
     print("=== UserDefine5: 数据误差计算和统计分析 ===")
     print(f"数据总数: {len(self.plotdata)}")
     print(f"选中数据: {self.outputlist}")
     print(f"数据名称: {self.plotdataname}")
-    
+
     try:
-        # 获取选中的数据索引
-        selected_indices = [i for i, selected in enumerate(self.outputlist) if selected == 1]
-        
+        # 构造 synthetic 过滤后的 outputlist
+        # 与 userdefine3/4 一致:跳过 original 配对,只保留 processed synthetic,
+        # 避免 Original + Processed 同时勾选时把同一对原始/处理曲线纳入对比(relative error ≈ 0 误导)
+        filtered_outputlist = [0] * len(self.outputlist)
+        selected_indices = []
+        for i in range(len(self.outputlist)):
+            if self.outputlist[i] != 1:
+                continue
+            info = self.message[i] if i < len(self.message) else {}
+            is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
+            if not is_synthetic:
+                continue
+            filtered_outputlist[i] = 1
+            selected_indices.append(i)
+
         if len(selected_indices) == 0:
-            QMessageBox.warning(self, "Warning", "No data selected!")
+            QMessageBox.warning(
+                self, "Warning",
+                "No synthetic (processed) data selected!\n"
+                "请至少勾选一条 Processed 数据(Original 数据不参与误差计算)。"
+            )
             return
-        
+
         if len(selected_indices) > 1:
             # 多数据集情况：以第一个数据为基准计算相对误差和统计分析
             print("Multi-dataset mode: Relative error analysis and statistical analysis")
-            
-            # 使用Error_stat.py中的函数计算相对误差
-            error_df_list, error_stats = calculate_relative_errors(self.plotdata, self.outputlist, self.plotdataname)
-            
+
+            # 使用Error_stat.py中的函数计算相对误差(传入过滤后的 outputlist)
+            error_df_list, error_stats = calculate_relative_errors(
+                self.plotdata, filtered_outputlist, self.plotdataname
+            )
+
             # 使用Error_stat.py中的函数计算统计指标
-            stats_list, stats_summary = calculate_statistical_indicators(self.plotdata, self.outputlist, self.plotdataname)
-            
+            stats_list, stats_summary = calculate_statistical_indicators(
+                self.plotdata, filtered_outputlist, self.plotdataname
+            )
+
             if error_df_list is None and stats_list is None:
                 QMessageBox.warning(self, "Warning", "Failed to calculate error analysis!")
                 return
-            
+
             # 清除之前的图形
             self.clearfigure()
-            
+
             # 绘制多数据集误差分析结果
             plot_multi_dataset_results(self, error_df_list, stats_list, error_stats, stats_summary)
-            
+
             print("Multi-dataset error analysis completed!")
-            QMessageBox.information(self, "Success", 
+            QMessageBox.information(self, "Success",
                 f"Multi-dataset error analysis completed!\nProcessed {len(selected_indices)} datasets.")
-            
+
         else:
             # 单数据集情况：计算内部统计误差
             print("Single dataset mode: Internal statistical error analysis")
-            
+
             # 使用Error_stat.py中的函数计算单数据集统计
             stats_dfs_list, single_stats_summary = calculate_single_dataset_statistics(
-                self.plotdata, self.outputlist, self.plotdataname
+                self.plotdata, filtered_outputlist, self.plotdataname
             )
-            
+
             if stats_dfs_list is None:
                 QMessageBox.warning(self, "Warning", "Invalid dataset or insufficient data points!")
                 return
-            
+
             # 清除之前的图形
             self.clearfigure()
-            
+
             # 绘制单数据集统计分析结果
             plot_single_dataset_results(self, stats_dfs_list, single_stats_summary, self.plotdataname[selected_indices[0]])
-            
+
             print("Single dataset statistical analysis completed!")
-            QMessageBox.information(self, "Success", 
+            QMessageBox.information(self, "Success",
                 f"Single dataset statistical analysis completed!\nAnalyzed dataset: {self.plotdataname[selected_indices[0]]}")
-            
+
     except Exception as e:
         print(f"Error in userdefine5: {e}")
         import traceback
         traceback.print_exc()
         QMessageBox.critical(self, "Error", f"Error calculation failed: {str(e)}")
-    
+
     return
 
 

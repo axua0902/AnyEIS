@@ -915,7 +915,7 @@ def plot_multi_dataset_results(
     绘制多数据集误差分析结果
 
     Parameters:
-    error_df_list: 相对误差DataFrame列表
+    error_df_list: 相对误差DataFrame列表(每个 entry 对应一个 comp_data vs base)
     stats_list: 统计分析DataFrame列表 [mean_df, variance_df, std_df, cv_df]
     error_stats: 误差统计信息
     stats_summary: 统计摘要信息
@@ -930,7 +930,8 @@ def plot_multi_dataset_results(
     # 创建2x2的子图布局
     subplot_positions = [221, 222, 223, 224]
 
-    # 绘制相对误差（如果有数据）
+    # 绘制相对误差(只以第一组数据为基准计算,即 error_df_list[0])
+    # 多个 comp_data 会导致图例条目过多(每 comp_data 贡献 4 条曲线),故仅保留第一组
     if error_df_list and len(error_df_list) > 0:
         ax1 = self.mpl.fig.add_subplot(subplot_positions[0])
         plot_analysis_unified(

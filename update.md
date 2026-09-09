@@ -9,7 +9,112 @@
 
 ## 一、当前活跃问题
 
-> ✅ **2026-09-06 全部已修复,无活跃问题**。Bug #006 四阶段方案(Phase 1-3 + Phase 2.5)均已完成,详见下文详情。
+> ✅ **2026-09-09 Bug #007 Phase 1 + Phase 2 已修复**(P0 × 1 + P1 × 2)。P0-2 多图合并按用户反馈回退为"只画第一组";P2 清理项(代码简洁性)暂不处理,保留原始实现。详见下文详情。
+
+---
+
+## 二、已完成条目详情
+
+### Bug #007 详情(数据统计与误差计算函数 — 2026-09-09)
+
+**用户反馈**:
+> "Data Statistics 按钮对应的函数,1.函数是否进行正确合理的计算;2.相关代码是否简洁。告诉我修改方案"
+
+**现象与初步检查**:
+- [ui_Figure.py#L637-L652](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/ui_Figure.py#L637-L652) `userdefine5btn`(Data Statistics 按钮)→ [Figure.py#L134](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Figure.py#L134) `lambda: userdefine5(self)`→ [UserDefineFun.py#L478-L551](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/UserDefineFun.py#L478-L551) `userdefine5`。
+
+**涉及文件**:
+- `EIS/FigureFile/UserDefineFun.py` — `userdefine5`(L478-L551)、`_iter_processed_synthetic`(L305-L319)
+- `EIS/FigureFile/Error_stat.py` — `calculate_relative_errors`(L7-L78)、`calculate_statistical_indicators`(L82-L167)、`calculate_single_dataset_statistics`(L171-L244)
+- `EIS/FigureFile/Plotfun.py` — `plot_multi_dataset_results`(L910-L970)、`plot_single_dataset_results`(L974-L1020)、`plot_analysis_unified`(L1023-L1131)
+
+**根因分析(共 6 项,分优先级)**:
+
+- **🔴 P0-1:synthetic 过滤缺失(功能正确性)**
+  - `userdefine3/4` 通过 `_iter_processed_synthetic`(UserDefineFun.py#L305-L319)跳过 original 配对;`userdefine5` 缺少这一过滤。
+  - 后果:当 Original + Processed 都勾选(默认行为)时,基准和对比可能是同一对原始/处理曲线,relative error ≈ 0,结果误导。
+
+- **🔴 P0-2:多数据集相对误差只画第一组(功能正确性)**
+  - [Plotfun.py#L933-L937](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Plotfun.py#L933-L937) 只绘制 `error_df_list[0]`,其余 comp_data 的相对误差被静默丢弃。
+  - 后果:用户选 ≥3 条数据时,只能看到 vs 第一条的误差,其余丢失。
+
+- **🟡 P1-1:列对齐按索引而非列名(鲁棒性)**
+  - [Error_stat.py#L53-L55](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Error_stat.py#L53-L55) `comp_columns[col_idx]` 按位置对齐;列顺序不一致时计算错位。
+
+- **🟡 P1-2:`dtype in ['float64', 'int64']` 过滤过窄(鲁棒性)**
+  - `float32` 等数值类型被跳过,影响 [Error_stat.py#L212](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Error_stat.py#L212)、[Error_stat.py#L350](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Error_stat.py#L350) 等多处。
+
+- **🟢 P2:重复/死代码**
+  - `selected_indices` 在 4 个函数中各自重算([UserDefineFun.py#L492](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/UserDefineFun.py#L492)、Error_stat.py 多处)。
+  - `error_stats` / `stats_summary` 在 Error_stat.py 中算,但 Plotfun.py 从不读(`plot_multi_dataset_results` 函数体中无引用)。
+  - `userdefine5` 调用 `self.clearfigure()`(UserDefineFun.py#L513)会同时重置 `excelnameTextEdit` 时间戳,这与误差计算无关,属副作用。`plot_multi_dataset_results` 内已调 `fig.clear()`。
+  - `np.var/std` 用 `ddof=1`,`np.mean` 不指定 ddof(默认除 N),文档未注明。
+
+**修复方案**(分阶段执行):
+
+- **Phase 1 — P0 修复(本次)**:
+  - **P0-1**:`userdefine5` 复用 `_iter_processed_synthetic` 过滤逻辑,跳过 original 配对:
+    ```python
+    selected_indices = []
+    for i, data in enumerate(self.plotdata):
+        if data is None or i >= len(self.outputlist):
+            continue
+        if self.outputlist[i] != 1:
+            continue
+        info = self.message[i] if i < len(self.message) else {}
+        is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
+        if not is_synthetic:
+            continue
+        selected_indices.append(i)
+    ```
+  - **P0-2**(回退,2026-09-09): 原计划"合并所有 `error_df_list` 条目 + 加 `_c{idx}` 后缀"会导致图例条目过多(每 comp_data 贡献 4 条曲线,N 个 comp_data → 4N 个条目),用户反馈后回退为"只画第一组 `error_df_list[0]`"(与原代码行为一致):
+    ```python
+    if error_df_list and len(error_df_list) > 0:
+        ax1 = self.mpl.fig.add_subplot(subplot_positions[0])
+        plot_analysis_unified(
+            ax1, error_df_list[0], "Relative Error Analysis", column_filter="RelErr"
+        )
+    ```
+
+- **Phase 2 — P1/P2 清理(后续)**:
+  - 列对齐改用列名匹配;`dtype` 检查改用 `pd.api.types.is_numeric_dtype`。
+  - `selected_indices` 计算抽成 helper;`error_stats`/`stats_summary` 要么删除,要么在图上以 `ax.text` 显示。
+  - 移除 `userdefine5` 中多余的 `self.clearfigure()`。
+
+**验证**:
+- 单数据集模式(选中 1 条):走 `calculate_single_dataset_statistics` 路径,不受 P0 修复影响。
+- 多数据集模式(选 ≥2 条 synthetic 条目):相对误差子图只画第一组 `error_df_list[0]`(即 vs 第二个选中的 synthetic),与原代码行为一致,避免图例条目过多。
+- Original + Processed 同时勾选:仅对 processed synthetic 条目做误差计算,与 `userdefine3/4` 行为一致。
+- 完整回归:`from EIS.FigureFile.UserDefineFun import userdefine5; from EIS.FigureFile.Plotfun import plot_multi_dataset_results; from EIS.FigureFile.Error_stat import calculate_relative_errors` 通过。
+- 实测验证(2026-09-09):
+  - **P0-1**: 模拟 4 条数据 `[A_orig, A_proc, B_orig, B_proc]`,outputlist 全选时,过滤后 `selected_indices=[1,3]`,`filtered_outputlist=[0,1,0,1]` ✓
+  - **P0-2(回退)**: `plot_multi_dataset_results` 改为只画 `error_df_list[0]`,避免图例条目过多;`calculate_relative_errors` 返回的 list 仍包含所有 comp_data 的误差 DF,Excel 导出路径(`Figurefun.py:create_error_analysis_charts` 与 `EISplot.py:write_error_analysis_data`)不受影响 ✓
+
+**Phase 1 已完成改动**:
+- [UserDefineFun.py#L478-L571](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/UserDefineFun.py#L478-L571) `userdefine5` 改造:用 `filtered_outputlist` 替代原 `self.outputlist` 传给 `calculate_relative_errors` / `calculate_statistical_indicators` / `calculate_single_dataset_statistics`,过滤规则与 `userdefine3/4` 的 `_iter_processed_synthetic` 对齐(跳过 `synthetic == False` 的 original 配对)。
+- [Plotfun.py#L910-L972](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Plotfun.py#L910-L972) `plot_multi_dataset_results` 改造:相对误差子图**只画 `error_df_list[0]`**(`vs 第二个选中的 synthetic`),避免图例条目过多(每 comp_data 贡献 4 条曲线);不改 `calculate_relative_errors` API,Excel 导出路径(`Figurefun.py:create_error_analysis_charts` 与 `EISplot.py:write_error_analysis_data`)仍正常消费 list 接口。
+- 未修改 `Error_stat.py`、`Figurefun.py`、`EISplot.py` — 避免影响下游 Excel 导出链路。
+
+**Phase 2 已完成改动(P1 鲁棒性)**:
+- [Error_stat.py#L37-L83](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Error_stat.py#L37-L83) `calculate_relative_errors` 改造:列对齐由 `enumerate(..., 1)` 索引对齐改为 `set(comp_data.columns)` 列名匹配(`if base_col not in comp_columns_set: continue`)。同时给 `current_error_df` 加上"至少 1 列误差才 append"的空 DataFrame 过滤。
+- [Error_stat.py#L109-L126](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Error_stat.py#L109-L126) `calculate_statistical_indicators` 改造:同样改用列名匹配。
+- [Error_stat.py#L217-L220](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/Error_stat.py#L217-L220) `calculate_single_dataset_statistics` 改造:`data[col].dtype in ['float64', 'int64']` → `pd.api.types.is_numeric_dtype(data[col])`,覆盖 `float32` / `float16` / `int32` / `int16` / `int8` 等所有数值类型。
+- [UserDefineFun.py#L348-L356](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/UserDefineFun.py#L348-L356)、[UserDefineFun.py#L357-L358](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/UserDefineFun.py#L357-L358)、[UserDefineFun.py#L437-L439](file:///c:/Users/zhang%20an/Desktop/Research/paper/6.AnyEIS%20Software/AnyEIS/EIS/FigureFile/UserDefineFun.py#L437-L439) 3 处 `dtype in ['float64', 'int64']` → `pd.api.types.is_numeric_dtype(...)`,覆盖 `userdefine3`(L348+L357)与 `userdefine4`(L438)的滚动/IQR/归一化逻辑。
+
+**实测验证(2026-09-09)**:
+- **P1-1**:
+  - comp 列顺序与 base 不同(`PHASE` 在 `Z` 之前)时:`Z[ohm]_RelErr[0]=10.0000%`、`PHASE[deg]_RelErr[0]=10.0000%`,与按列名匹配后的预期一致(若按索引则会错位)。
+  - comp 缺少 base 中某列(如缺少 `PHASE[deg]`):该列被自动跳过,error_df 中只保留 `Z[ohm]_RelErr`,不会因错位产生虚假误差。
+- **P1-2**:
+  - `float32` 数据的 3 列全部进入 `rolling_std_df` 与 `relative_deviation_df`(修复前会被 dtype 过滤跳过)。
+  - `int32` 数据同样正确处理。
+
+**状态**: ✅ Phase 1 + Phase 2 已修复(2026-09-09),P2 清理项(代码简洁性)按用户要求暂不处理,保留原始实现
+
+**P2 清理项待办(2026-09-09 暂不处理)**:
+- P2-1:`userdefine5` 中 `self.clearfigure()` 副作用(重置 `excelnameTextEdit` 时间戳) — 暂不修
+- P2-2:`np.var/std` 用 `ddof=1` 与 `np.mean` 不指定 ddof 的语义注释 — 暂不修
+- P2-3:`selected_indices` 在 4 个函数中重复计算(可抽 helper) — 暂不修
 
 ---
 
@@ -116,7 +221,7 @@
 
 ## 三、归档摘要(历史总览,详见 `BUGS.md` git 历史)
 
-### Bug 系列(已全部处理)
+### Bug 系列
 
 | ID | 标题 | 状态 |
 |----|------|------|
@@ -127,6 +232,7 @@
 | Bug #005 | 计算行 Clear 按钮孤立 / 槽实现不一致 | ✅ 已修复(2026-09-06) |
 | Bug #005b | Clear 误清 Fixed 列 / Simulation 6 列错位 | ✅ 已修复(2026-09-06) |
 | Bug #006 | 表格列与算法匹配(Phase 1 架构对称 + Phase 2 删 Fixed + Phase 3 N/A) | ✅ 已修复(2026-09-06) |
+| Bug #007 | 数据统计与误差计算函数(synthetic 过滤缺失 + 列对齐 + dtype) | ✅ Phase 1+2 已修复(2026-09-09) |
 
 **Bug #004 详情**:
 
@@ -319,6 +425,7 @@
 | 2026-09-06 | Bug #005 | 计算行 Clear 按钮 | Fitting/simulation.py 拆分 `clearECCalculation` / `clearMTCalculation`（B-1 语义），connect `tab2.clearBtn`；新建 test_clear_calculation.py（19/19 通过） |
 | 2026-09-06 | Bug #005b | Clear 误清 Fixed 列 / Simulation 6 列错位 | 调整 cleared_cols = (3, 7) 不含 6（保留 Fixed 用户输入）；simulation 路径 6 列表无计算结果列，完全不动表；test_clear_calculation.py 扩到 23/23 通过 |
 | 2026-09-06 | Bug #006 | 表格列与算法匹配(四阶段方案) | Phase 1: MTMUI.setMTMTableHeader 镜像 ECUI;Phase 2: 彻底删除 Fixed 死列(8→7 / 6→5 列);Phase 3: Error [%] 非 LS 算法显示 N/A;Phase 2.5: simu 模式删除 Max/Min 死列(5→3 列);新建 test_fixed_removal.py(17/17) + test_process_ec_mt_results.py(8/8) + test_simu_3column.py(12/12);update.md 标记已完成 |
+| 2026-09-09 | Bug #007 | 数据统计与误差计算函数(Phase 1+2 + P0-2 回退) | update.md 记录 6 项问题分析(2×P0 + 2×P1 + 2×P2);Phase 1 完成:userdefine5 构造 filtered_outputlist 跳过 original 配对 + plot_multi_dataset_results 只画 error_df_list[0] (P0-2 多图合并按用户反馈回退,避免图例条目过多);Phase 2 完成:列对齐改按列名匹配 + 4 处 dtype 检查改用 `pd.api.types.is_numeric_dtype`;实测验证全部通过;P2 清理项按用户要求暂不处理 |
 
 ---
 
