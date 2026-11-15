@@ -1,0 +1,164 @@
+{
+  "10% Living": {
+    "model": "M4: R1 + (CPE1||R2) + (C2||R3)",
+    "metrics": {
+      "chi2_red": 0.000850515662665068,
+      "rms_rel": 4.090410206688926,
+      "rms_abs": 12.46979251121989,
+      "max_rel": 19.643542791544235
+    },
+    "requires_cpe": true,
+    "metrics_full_range": {
+      "chi2_red": 0.0049338690878078335,
+      "rms_rel": 9.85573678961734,
+      "rms_abs": 12.187993917129722,
+      "max_rel": 72.52373866527665
+    },
+    "params": {
+      "R1": 0.9367146735088066,
+      "CPE1": 5.17682190112057e-07,
+      "alphaCPE1": 0.599869213835624,
+      "R2": 338.74874941759606,
+      "C2": 7.29215176984694e-12,
+      "R3": 1034.741673355266
+    },
+    "stderr": {
+      "R1": 0.3701796231049445,
+      "CPE1": 2.991386372714151e-08,
+      "alphaCPE1": 0.007421272721205629,
+      "R2": 123.33125565154023,
+      "C2": 8.127658519232408e-14,
+      "R3": 12.05826442502117
+    },
+    "identifiability": {
+      "status": "visible",
+      "f_char": 795774715.4594766,
+      "f_min": 1000000.0,
+      "f_max": 2088600000.0,
+      "identifiable": true,
+      "reason": "fc=7.96e+08Hz 在测量范围内（边缘，靠近f_max）",
+      "parallel_R_name": "R3",
+      "C_name": "C2"
+    },
+    "notes": [
+      "f_c (CPE) = 2.906e+05 Hz",
+      "低频截距 R1+R2 = 339.7 ohm"
+    ],
+    "n_points_total": 192,
+    "n_points_used": 183,
+    "n_points_excluded_below_impedance_floor": 9,
+    "impedance_floor_ohm": 10.0,
+    "freq_range_Hz": [
+      1000000.0,
+      2088600000.0
+    ]
+  },
+  "20% Living": {
+    "model": "M4: R1 + (CPE1||R2) + (C2||R3)",
+    "metrics": {
+      "chi2_red": 0.0012406584962133765,
+      "rms_rel": 4.940506792946901,
+      "rms_abs": 11.993477904517723,
+      "max_rel": 19.9683271910917
+    },
+    "requires_cpe": true,
+    "metrics_full_range": {
+      "chi2_red": 0.004317266242733135,
+      "rms_rel": 9.219337240485814,
+      "rms_abs": 11.754262254213932,
+      "max_rel": 62.92527629574076
+    },
+    "params": {
+      "R1": 0.5007286462050939,
+      "CPE1": 1.081187268001444e-06,
+      "alphaCPE1": 0.5432622643529903,
+      "R2": 1152.3389834084621,
+      "C2": 7.432537271968707e-12,
+      "R3": 447.79646716400634
+    },
+    "stderr": {
+      "R1": 0.23679951945278632,
+      "CPE1": 6.790430253095975e-08,
+      "alphaCPE1": 0.00518832599375935,
+      "R2": 210.486537520725,
+      "C2": 1.0731437058344132e-13,
+      "R3": 5.652190895000498
+    },
+    "identifiability": {
+      "status": "visible",
+      "f_char": 795774715.4594766,
+      "f_min": 1000000.0,
+      "f_max": 2174400000.0,
+      "identifiable": true,
+      "reason": "fc=7.96e+08Hz 在测量范围内（边缘，靠近f_max）",
+      "parallel_R_name": "R3",
+      "C_name": "C2"
+    },
+    "notes": [
+      "f_c (CPE) = 3.534e+04 Hz",
+      "低频截距 R1+R2 = 1153 ohm"
+    ],
+    "n_points_total": 192,
+    "n_points_used": 184,
+    "n_points_excluded_below_impedance_floor": 8,
+    "impedance_floor_ohm": 10.0,
+    "freq_range_Hz": [
+      1000000.0,
+      2174400000.0
+    ]
+  },
+  "30% Living": {
+    "model": "M4: R1 + (CPE1||R2) + (C2||R3)",
+    "metrics": {
+      "chi2_red": 0.0016975914296310114,
+      "rms_rel": 5.779382181446939,
+      "rms_abs": 9.778590084914132,
+      "max_rel": 22.76520830636363
+    },
+    "requires_cpe": true,
+    "metrics_full_range": {
+      "chi2_red": 0.0043975936373915215,
+      "rms_rel": 9.30470981471994,
+      "rms_abs": 9.615682221207782,
+      "max_rel": 58.02329702238793
+    },
+    "params": {
+      "R1": 0.6307052825781013,
+      "CPE1": 1.5245618788977499e-06,
+      "alphaCPE1": 0.5115389152947847,
+      "R2": 329.88030794843337,
+      "C2": 7.564422844473743e-12,
+      "R3": 284.5851776923619
+    },
+    "stderr": {
+      "R1": 0.31760350469511167,
+      "CPE1": 9.734843714398576e-08,
+      "alphaCPE1": 0.005225515786298415,
+      "R2": 43.05988025089833,
+      "C2": 1.550254546394872e-13,
+      "R3": 3.630368917628905
+    },
+    "identifiability": {
+      "status": "visible",
+      "f_char": 795774715.4594766,
+      "f_min": 1000000.0,
+      "f_max": 2263700000.0,
+      "identifiable": true,
+      "reason": "fc=7.96e+08Hz 在测量范围内（边缘，靠近f_max）",
+      "parallel_R_name": "R3",
+      "C_name": "C2"
+    },
+    "notes": [
+      "f_c (CPE) = 4.467e+05 Hz",
+      "低频截距 R1+R2 = 330.5 ohm"
+    ],
+    "n_points_total": 192,
+    "n_points_used": 185,
+    "n_points_excluded_below_impedance_floor": 7,
+    "impedance_floor_ohm": 10.0,
+    "freq_range_Hz": [
+      1000000.0,
+      2263700000.0
+    ]
+  }
+}
