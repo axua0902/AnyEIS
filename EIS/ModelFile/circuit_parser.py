@@ -5,7 +5,10 @@
 
 def parse_element_type(element_name):
     """根据元件名称确定元件类型"""
-    if element_name.startswith('R'):
+    if element_name.startswith('CPE'):
+        # 常相位角元件: 必须先于 'C' 判断, 否则 CPE1 会被当成理想电容
+        return 'cpe'
+    elif element_name.startswith('R'):
         return 'resistor'
     elif element_name.startswith('C'):
         return 'capacitor'

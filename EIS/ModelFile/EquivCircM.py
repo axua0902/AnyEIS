@@ -78,6 +78,14 @@ def creatparas(params,name1,init_val):
 
 
 def elementsZ(element,pm,freq):
+    if element.startswith('CPE'):
+        # 常相位角元件(CPE): Z=1/(Q*(j*omega)^n)
+        # Q 对应元件名(如 CPE1), n 对应 alpha+元件名(如 alphaCPE1)
+        Q=pm[element].value
+        nkey='alpha'+element
+        n=pm[nkey].value if nkey in pm else 1.0   # 兼容旧模型: 缺 n 时退化为理想电容
+        Z=CPE(Q,n,freq)
+        return Z
     if -1!=element.find('C',0,1):
         ss=pm[element].value
         Z=C(ss,freq)
@@ -97,6 +105,10 @@ def elementsZ(element,pm,freq):
     
 def expressZ(element):
     # print(type(element))
+    if element.startswith('CPE'):
+        # 常相位角元件(CPE): 指数 n 用 alpha+元件名 表示
+        Zexpress='1/('+str(element)+'*(j*omega)^alpha'+str(element)+')'
+        return Zexpress
     if -1!=element.find('C',0,1):
         Zexpress='1/(j*omega*'+str(element)+')'
         return Zexpress

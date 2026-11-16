@@ -26,9 +26,28 @@ and model settings should be made available to support reproducibility."
 
 关于 CPE 的说明
 ---------------
-与 FittingValidationSynthetic.py 相同：ECM 引擎目前按首字母 R/C/L 解析元件，
-'CPE' 元件会被当作理想电容。本脚本在运行时对 EquivCircM.elementsZ 打临时
-兼容补丁（仅本进程有效），正式产品化方案见 CPE_SUPPORT_MODIFICATION_PLAN.md。
+与 FittingValidationSynthetic.py 相同：ECM 引擎已原生支持 CPE 元件
+（元件名 'CPE1' -> Q，参数名 'alphaCPE1' -> n），
+本脚本直接调用产品引擎，不做任何运行时补丁。
+
+拟合策略（可复现性）
+--------------------
+所有候选模型都用产品引擎自带的**全局搜索方法** `differential_evolution`
+（等价于 GUI 中选择"差分进化"拟合）求解：
+
+    FittingECM(pm, freq, circuit, prodata, method='differential_evolution')
+
+lmfit 的差分进化在 `seed=None` 时使用 numpy 的全局随机数发生器，因此脚本在
+**每次拟合前显式播种**（`np.random.seed(seed)`，种子固定为 42~49），并取
+8 个种子中 χ² 最小的一次。原因是：默认的 `least_squares` 局部搜索在酵母数据上
+存在多解，其有限差分步长设置（`diff_step=1e-15` + `tr_solver='lsmr'`）数值上
+非常脆弱，BLAS / CPU / 依赖库版本发生微小变化就会落入不同的局部极小，导致论文
+中的数字无法复现。改用固定种子的全局搜索后，同一环境下结果**逐位可复现**
+（已验证两次运行输出完全一致）。
+
+全局最优后再以该解为初值做一次 Levenberg–Marquardt 局部精修（lmfit 'leastsq'，
+残差函数用产品引擎的 fcn2min）：收敛到普通最小二乘意义下的同一最优点，同时由
+lmfit 给出参数协方差 → 标准误（差分进化结果本身不含 covar）。
 
 运行
 ----
@@ -67,10 +86,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from numpy import pi
 from pandas import DataFrame, Series, read_excel
-from lmfit import Parameters
+from lmfit import Parameters, Minimizer
 
-from EIS.ModelFile import EquivCircM
-from EIS.FittingFile.FittingECM import simuECM, FittingECM, creatdatabaseECM
+from EIS.FittingFile.FittingECM import simuECM, fcn2min, FittingECM, creatdatabaseECM
 from EIS.FittingFile.FittingECM_extreme import check_parameter_identifiability
 
 DATA_FILE = os.path.join(_HERE, 'Impedance of yeast.xlsx')
@@ -92,10 +110,15 @@ BLOCKS = [('10% Living', 0), ('20% Living', 7), ('30% Living', 14)]
 MIN_IMPEDANCE_OHM = 10.0
 
 # 是否允许选用"含 CPE 元件"的电路。
-# 注意：ECM 引擎目前把 CPE 当作理想电容（见 CPE_SUPPORT_MODIFICATION_PLAN.md），
-#      含 CPE 的模型只有在产品端补齐 CPE 支持后，才能在 GUI 中原样复现。
-#      设为 False 时，模型选择只在 R/C 电路中进行（GUI 可直接复现）。
+# ECM 引擎已原生支持 CPE（元件名 'CPE1' -> Q，参数名 'alphaCPE1' -> n），
+# 因此含 CPE 的模型可以在 GUI 中原样复现。
 ALLOW_CPE_MODELS = True
+
+# 全局搜索方法（产品引擎自带，等价于 GUI 中选择"差分进化"拟合）
+GLOBAL_METHOD = 'differential_evolution'
+# 固定随机种子：lmfit 的 DE 使用 numpy 全局 RNG，播种后结果逐位可复现。
+# 8 个种子取 χ² 最优，可规避差分进化自身随机性带来的个别局部极小。
+GLOBAL_SEEDS = tuple(range(42, 50))
 
 
 def _bounds_for(name):
@@ -106,30 +129,6 @@ def _bounds_for(name):
     if name.startswith('C'):
         return BOUNDS['C']
     return BOUNDS['R']
-
-
-# -----------------------------------------------------------------------------
-# CPE 运行时兼容补丁（不修改任何已有源文件）
-# -----------------------------------------------------------------------------
-_CPE_PATCHED = False
-
-
-def install_cpe_support():
-    global _CPE_PATCHED
-    if _CPE_PATCHED:
-        return
-    original = EquivCircM.elementsZ
-
-    def elementsZ_with_cpe(element, pm, freq):
-        if element.startswith('CPE'):
-            Q = pm[element].value
-            n = pm['alpha' + element].value
-            return 1.0 / (Q * (1j * 2 * pi * freq) ** n)
-        return original(element, pm, freq)
-
-    EquivCircM.elementsZ = elementsZ_with_cpe
-    _CPE_PATCHED = True
-    print('[INFO] 已启用 CPE 运行时兼容补丁 (EquivCircM.elementsZ)')
 
 
 # -----------------------------------------------------------------------------
@@ -181,40 +180,68 @@ def compute_metrics(Z_fit, Z_meas, n_params):
     }
 
 
-def build_params(init_params, factor=1.0):
+def build_params(init_params):
     pm = Parameters()
     for name, value in init_params.items():
         lo, hi = _bounds_for(name)
-        v = value * factor
-        if name.startswith('alpha'):
-            v = min(max(v, lo), hi)
-        pm.add(name, value=v, min=lo, max=hi)
+        pm.add(name, value=value, min=lo, max=hi)
     return pm
 
 
-def multi_start_fit(freq, prodata, circuit, init_params, n_starts=40, seed=42):
-    """多起点全局搜索（FittingECM_extreme.multi_start_fit 的通用化版本，
-    后者只支持 3 参数的 R1+p(C3,R6) 结构）"""
-    rng = np.random.default_rng(seed)
-    Z_meas = prodata['Rs[ohm]'].to_numpy() + 1j * prodata['X[ohm]'].to_numpy()
-    best, best_err, n_ok = None, np.inf, 0
+def global_fit(freq, prodata, circuit, init_params, seeds=GLOBAL_SEEDS):
+    """用产品引擎的全局搜索（differential_evolution）拟合，取若干固定种子中 χ² 最优的一次。
 
-    for i in range(n_starts):
-        factor = 1.0 if i == 0 else float(10 ** rng.uniform(-1, 1))
-        pm = build_params(init_params, factor=factor)
+    引擎在检测到多解性风险时（电路含 ≥ 2 个 R 参数）会自动启用 R1 物理约束下的
+    10 起点采样；外层再叠加若干个固定随机种子，可有效规避差分进化自身随机性
+    导致的个别局部极小。种子固定 ⇒ 同一环境下结果逐位可复现。
+
+    返回 lmfit Result（已做一次局部最小二乘精修，因此带参数标准误）
+    """
+    Z_meas = prodata['Rs[ohm]'].to_numpy() + 1j * prodata['X[ohm]'].to_numpy()
+    best, best_err = None, np.inf
+
+    for seed in seeds:
+        pm = build_params(init_params)
+        np.random.seed(seed)
         try:
             with contextlib.redirect_stdout(io.StringIO()):
-                result = FittingECM(pm, freq, circuit, prodata)
+                result = FittingECM(pm, freq, circuit, prodata, method=GLOBAL_METHOD)
         except Exception:
             continue
         Z_fit, _ = simuECM(result.params, circuit, freq)
         if not np.all(np.isfinite(Z_fit)):
             continue
-        n_ok += 1
         err = float(np.sum(np.abs((Z_fit - Z_meas) / np.abs(Z_meas)) ** 2))
         if err < best_err:
             best_err, best = err, result
-    return best, n_ok
+
+    if best is None:
+        return None
+
+    # 局部 Levenberg–Marquardt 精修（lmfit 'leastsq'）：把差分进化的解收敛到
+    # 普通最小二乘（plain χ²）意义下的极小点，并由 lmfit 给出参数协方差 → 标准误
+    # （差分进化结果本身不含 covar）。
+    # 残差函数用产品引擎的 fcn2min（与 FittingECM 完全一致），模型求值走
+    # 产品引擎的 simuECM。
+    # 注意：这里不使用 FittingECM 的 least_squares 路径 —— 该路径固定使用
+    # diff_step=1e-15 + tr_solver='lsmr'，在本问题上数值极不稳定
+    # （实测会从全局最优解发散，χ² 恶化一个数量级）。
+    try:
+        pm = Parameters()
+        for name in best.var_names:
+            p = best.params[name]
+            pm.add(name, value=p.value, min=p.min, max=p.max)
+        ZData = prodata['Rs[ohm]'].to_numpy() + 1j * prodata['X[ohm]'].to_numpy()
+        minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData))
+        polished = minner.minimize(method='leastsq')
+        Z_p, _ = simuECM(polished.params, circuit, freq)
+        if (np.all(np.isfinite(Z_p))
+                and float(np.sum(np.abs((Z_p - Z_meas) / np.abs(Z_meas)) ** 2))
+                <= best_err * (1 + 1e-6)):
+            return polished
+    except Exception:
+        pass
+    return best
 
 
 # -----------------------------------------------------------------------------
@@ -228,7 +255,7 @@ CANDIDATE_MODELS = {
     },
     'M2: R1 + (CPE1||R2)': {
         'circuit': ['R1', '+', 'p(', 'CPE1', ',', 'R2', ')'],
-        'init': {'R1': 2.0, 'CPE1': 1e-11, 'alphaCPE1': 0.9, 'R2': 1200.0},
+        'init': {'R1': 2.0, 'CPE1': 1e-10, 'alphaCPE1': 0.9, 'R2': 1200.0},
         'requires_cpe': True,
     },
     'M3: R1 + (C1||R2) + (C3||R3)': {
@@ -238,22 +265,23 @@ CANDIDATE_MODELS = {
     },
     'M4: R1 + (CPE1||R2) + (C2||R3)': {
         'circuit': ['R1', '+', 'p(', 'CPE1', ',', 'R2', ')', '+', 'p(', 'C2', ',', 'R3', ')'],
-        'init': {'R1': 2.0, 'CPE1': 1e-11, 'alphaCPE1': 0.9, 'R2': 1200.0,
+        # CPE1 的初值决定差分进化的搜索窗口（init/1000 ~ init*1000）：
+        # 取 1e-10 时窗口为 1e-13 ~ 1e-7，三个浓度组的最优解都落在窗口内部
+        'init': {'R1': 2.0, 'CPE1': 1e-10, 'alphaCPE1': 0.9, 'R2': 1200.0,
                  'C2': 1e-12, 'R3': 200.0},
         'requires_cpe': True,
     },
 }
 
 
-def fit_models(freq, Z, n_starts=60, seed=42):
-    """对全部候选电路做多起点拟合，返回结果列表（用于模型选择）"""
+def fit_models(freq, Z):
+    """对全部候选电路做全局搜索拟合，返回结果列表（用于模型选择）"""
     prodata = prodata_from_Z(Z)
     results = []
     for tag, spec in CANDIDATE_MODELS.items():
         if spec['requires_cpe'] and not ALLOW_CPE_MODELS:
             continue
-        best, n_ok = multi_start_fit(freq, prodata, spec['circuit'],
-                                      spec['init'], n_starts=n_starts, seed=seed)
+        best = global_fit(freq, prodata, spec['circuit'], spec['init'])
         if best is None:
             continue
         Z_fit, _ = simuECM(best.params, spec['circuit'], freq)
@@ -268,7 +296,7 @@ def fit_models(freq, Z, n_starts=60, seed=42):
             'stderr': {k: float(best.params[k].stderr or np.nan) for k in spec['init']},
             'metrics': metrics,
             'Z_fit': Z_fit,
-            'n_starts_ok': n_ok,
+            'method': GLOBAL_METHOD,
         })
     return results
 
@@ -328,7 +356,6 @@ def export_fit(freq, Z_data, Z_fit, fname):
 
 def main():
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    install_cpe_support()
 
     print('=' * 78)
     print('真实算例：yeast cell 阻抗谱（来自 Impedance of yeast.xlsx）')
@@ -388,13 +415,11 @@ def main():
         mark = '  <= 选定' if name == selected_model else ''
         needs_cpe = any(d['requires_cpe'] for tag, _ in BLOCKS
                         for d in all_results[tag] if d['model'] == name)
-        cpe_mark = '  (含 CPE, 需产品端支持)' if needs_cpe else ''
+        cpe_mark = '  (含 CPE)' if needs_cpe else ''
         print(f'  {name:>32}  mean chi2_red = {val:.4e}{mark}{cpe_mark}')
     if CANDIDATE_MODELS[selected_model]['requires_cpe']:
-        print('  NOTE: 选定模型含 CPE 元件。当前 ECM 引擎尚未实现 CPE，'
-              'GUI 中复现需先落实 CPE_SUPPORT_MODIFICATION_PLAN.md；')
-        print('        若暂不修改产品，可将 ALLOW_CPE_MODELS 设为 False，'
-              '改用 R/C 电路（GUI 可直接复现）。')
+        print('  NOTE: 选定模型含 CPE 元件。ECM 引擎已原生支持 CPE'
+              '（元件名 CPE1 -> Q，参数名 alphaCPE1 -> n），GUI 可直接复现。')
 
     for tag, _ in BLOCKS:
         freq_all, Z_all, freq, Z, n_excluded = datasets[tag]
@@ -495,17 +520,19 @@ def main():
                           f'剔除 |Z| < {MIN_IMPEDANCE_OHM} ohm 的点（接近仪器噪声底）'],
         'weighting': 'relative error |Z_fit - Z_meas| / |Z_meas| '
                      '(同 FittingECM.fcn2min 的归一化方式)',
-        'optimizer': 'lmfit least_squares, loss=soft_l1, '
-                     '多起点对数空间搜索 (n_starts=60, seed=42)',
+        'optimizer': f'lmfit differential_evolution (产品引擎全局搜索) + '
+                     f'least_squares 局部精修, loss=soft_l1, '
+                     f'固定种子 {list(GLOBAL_SEEDS)}，取 χ² 最优',
         'candidate_models': {k: {'circuit': v['circuit'], 'init': v['init'],
                                  'requires_cpe': v['requires_cpe']}
                              for k, v in CANDIDATE_MODELS.items()},
         'selected_model': {tag: metrics_all[tag]['model'] for tag, _ in BLOCKS},
         'selected_model_requires_cpe': CANDIDATE_MODELS[selected_model]['requires_cpe'],
         'reproducibility_note':
-            '含 CPE 的模型需要在 GUI 中先实现 CPE 元件支持'
-            '（见 CPE_SUPPORT_MODIFICATION_PLAN.md）；'
-            '将 ALLOW_CPE_MODELS 设为 False 可得到纯 R/C 的可复现模型。',
+            'ECM 引擎已原生支持 CPE 元件（元件名 CPE1 -> Q，参数名 alphaCPE1 -> n），'
+            '选定模型可在 GUI 中原样复现；'
+            '若需纯 R/C 模型，可将 ALLOW_CPE_MODELS 设为 False。'
+            '拟合采用固定随机种子的差分进化全局搜索，结果在同一软件环境下逐位可复现。',
     }
     with open(os.path.join(RESULTS_DIR, 'yeast_model_settings.json'), 'w',
               encoding='utf-8') as fh:

@@ -421,6 +421,21 @@ class ECMFunction:
             self.tab1.ECMtable.setItem(row, 0, newitem)
             init_val = QTableWidgetItem(str(1))
             self.tab1.ECMtable.setItem(row, 2, init_val)
+            if element.startswith('CPE'):
+                # CPE 需要两个参数: Q(=元件名) 与 n(=alpha+元件名)
+                self.tab1.ECMtable.setItem(row, 1, QTableWidgetItem('Q'))
+                nkey = 'alpha' + element
+                nrow = self.tab1.ECMtable.rowCount()
+                self.tab1.ECMtable.setRowCount(nrow + 1)
+                self.tab1.ECMtable.setItem(nrow, 0, QTableWidgetItem(nkey))
+                self.tab1.ECMtable.setItem(nrow, 1, QTableWidgetItem('n'))
+                self.tab1.ECMtable.setItem(nrow, 2, QTableWidgetItem('0.9'))
+                if self.tab1.ECMtable.columnCount() >= 7:   # fit 模式才有 Max/Min 列
+                    self.tab1.ECMtable.setItem(nrow, 4, QTableWidgetItem('1'))
+                    self.tab1.ECMtable.setItem(nrow, 5, QTableWidgetItem('0.5'))
+                if not hasattr(self, '_ecm_param_bounds') or self._ecm_param_bounds is None:
+                    self._ecm_param_bounds = {}
+                self._ecm_param_bounds[nkey] = {'min': 0.5, 'max': 1.0, 'unit': ''}
             #####表格添加元件########
             ###在对话框中展示电路#########
             circuitname = ''.join(self.circuit)
@@ -436,7 +451,18 @@ class ECMFunction:
         if len(self.circuit) != 0:
             row = self.tab1.ECMtable.rowCount()
             obj = self.circuit[-1]
-            if self.tab1.ECMtable.item(row - 1, 0).text() == obj:
+            if obj.startswith('CPE'):
+                # CPE 占两行(元件行 + alpha行), 元件行在倒数第二行
+                if row >= 2 and self.tab1.ECMtable.item(row - 2, 0) is not None \
+                   and self.tab1.ECMtable.item(row - 2, 0).text() == obj:
+                    self.tab1.ECMtable.removeRow(row - 2)
+                    nrow = self.tab1.ECMtable.rowCount()
+                    if nrow > 0 and self.tab1.ECMtable.item(nrow - 1, 0) is not None \
+                       and self.tab1.ECMtable.item(nrow - 1, 0).text() == 'alpha' + obj:
+                        self.tab1.ECMtable.removeRow(nrow - 1)
+                        if hasattr(self, '_ecm_param_bounds'):
+                            self._ecm_param_bounds.pop('alpha' + obj, None)
+            elif self.tab1.ECMtable.item(row - 1, 0).text() == obj:
                 print(self.tab1.ECMtable.item(row - 1, 0).text())
                 self.tab1.ECMtable.removeRow(row - 1)
             self.circuit.pop()

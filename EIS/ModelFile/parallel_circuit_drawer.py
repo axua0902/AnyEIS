@@ -11,6 +11,7 @@ ELEMENT_MAP = {
     'resistor': elm.Resistor,
     'capacitor': elm.Capacitor, 
     'inductor': elm.Inductor,
+    'cpe': elm.CapacitorVar,      # CPE: 箭头穿过的可变/非理想电容符号
     'line': elm.Line
 }
 

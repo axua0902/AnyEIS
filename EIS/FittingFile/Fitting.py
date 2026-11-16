@@ -373,6 +373,8 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                 min_val = float(self.tab1.ECMtable.item(temp - 1, 5).text())
             except Exception:
                 min_val = 1e-15
+            if elementname1.startswith('alphaCPE'):   # CPE 指数 n 必须落在 (0.5, 1.0]
+                min_val, max_val = 0.5, 1.0
             # 防止下界 > 上界
             if min_val >= max_val:
                 min_val, max_val = 1e-15, 1e15
