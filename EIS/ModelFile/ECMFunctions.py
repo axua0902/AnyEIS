@@ -66,6 +66,9 @@ def create_ecm_model_json(obj):
             - circuit: 电路元件列表
             - ECMparams: lmfit Parameters 对象
             - _ecm_param_bounds: (可选) Bug #006 Phase 2.5 simu 隐藏持久化字典
+            - setting_widget: (可选) 设置面板, 提供 get_settings() 返回
+              {'method': <str>, <参数名>: <文本>}; 未注入时该部分记录为默认值
+            - original_prodataname: (可选) 拟合实际使用的数据集名列表
 
     返回:
         dict: ECM模型的JSON数据
@@ -78,6 +81,31 @@ def create_ecm_model_json(obj):
     model_name = "Untitled Model"
     if hasattr(obj, 'current_model_path') and obj.current_model_path:
         model_name = os.path.splitext(os.path.basename(obj.current_model_path))[0]
+
+    # --- 拟合设置（服务 R4-M2 可复现性）---
+    # 说明: loss 在引擎中由噪声水平自动选择(FittingECM._auto_select_loss:
+    #       <0.001->linear, >0.10->huber, 其余->soft_l1), GUI 未开放该项,
+    #       因此此处记语义值 'auto' 而非写死某个具体 loss;
+    #       differential_evolution/dual_annealing/ampgo 路径不使用 loss。
+    fitting_settings = {
+        'method': 'least_squares',
+        'parameters': {},
+        'loss': 'auto',
+        'loss_policy': ('least_squares 时由引擎按噪声水平自动选择 loss '
+                        '(<0.001->linear, >0.10->huber, 其余->soft_l1); '
+                        'differential_evolution/dual_annealing/ampgo 不使用 loss'),
+        'datasets': list(getattr(obj, 'original_prodataname', []) or []),
+        'dataset_count': len(getattr(obj, 'original_prodataname', []) or []),
+    }
+    sw = getattr(obj, 'setting_widget', None)
+    getter = getattr(sw, 'get_settings', None) if sw is not None else None
+    if callable(getter):
+        try:
+            _s = getter()                      # {'method': ..., <参数名>: <文本>}
+            fitting_settings['method'] = _s.get('method') or 'least_squares'
+            fitting_settings['parameters'] = {k: v for k, v in _s.items() if k != 'method'}
+        except Exception as e:
+            print(f"[create_ecm_model_json] 读取拟合设置失败: {e}")
 
     model_data = {
         "version": "1.0",
@@ -92,7 +120,8 @@ def create_ecm_model_json(obj):
             "unit": "Hz"
         },
         "circuit_string": obj.tab1.connectionTextEdit.text() or "",
-        "parameters": []
+        "parameters": [],
+        "fitting_settings": fitting_settings
     }
 
     table = obj.tab1.ECMtable
