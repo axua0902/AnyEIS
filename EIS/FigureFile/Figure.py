@@ -21,6 +21,27 @@ from EIS.Other.Datacheck import detect_data_type_from_columns
 from setting import Settings
 
 
+def _dataset_style(info):
+    """
+    根据数据元信息(dataInfo)判定该数据集的画法。
+
+    'fit'   -> 虚线 '--'    (拟合结果 / 滤波结果)
+    'simul' -> 实线 '-'     (仿真结果)
+    'data'  -> 空心圆圈散点 (用于拟合/滤波的原始数据等)
+
+    依据的是各模块写入的元信息标记,而不是数据名 —— 数据名可能被用户文件
+    占用(例如 'ECM_CPE.xlsx' 的数据名恰好是 'ECMSimulation',
+    'FILTERDATA.xlsx' 的数据名是 'filter'),按名字判定会把原始数据
+    误画成连线。
+    """
+    if isinstance(info, dict):
+        if info.get('fit_applied') or info.get('filter_applied'):
+            return 'fit'
+        if info.get('simulation'):
+            return 'simul'
+    return 'data'
+
+
 def _ensure_writable_dir(dir_path):
     """
     确保目录存在且可写,失败时返回 False。
@@ -92,6 +113,7 @@ class FigWidget(QWidget ,FigureUI):
         self.plotdataname = list()  # 被选中的数据名 
         self.outputlist = list()    # 被选中的数据 
         self.message = list()      # 数据信息 
+        self.data_styles = None    # 每个数据集的画法(与 plotdata 下标一一对应)
 
         ########变量申明###############
 
@@ -268,6 +290,7 @@ class FigWidget(QWidget ,FigureUI):
         self.plotdataname = message2
         self.plotdata = message3
         self.message = message4
+        self.data_styles = self._build_data_styles(self.message)
 
         # Auto-switch datatype ComboBox to match the actual output data type.
         # Processing modules (Paraplate / DieMat / Three-Solution / TLcalibrate ...)
@@ -460,6 +483,17 @@ class FigWidget(QWidget ,FigureUI):
 
 
 
+    def _build_data_styles(self, message, n=None):
+        """
+        依据数据元信息生成每个数据集的画法列表。
+        元信息缺失或长度与数据不一致时返回 None(绘图时按数据名兜底判定)。
+        """
+        if n is None:
+            n = len(self.plotdata)
+        if not message or len(message) != n:
+            return None
+        return [_dataset_style(info) for info in message]
+
     def _filter_synthetic_for_display(self, outputlist, plotdataname, plotdata, message):
         """
         根据当前页面模式和复选框状态过滤要显示的条目。
@@ -468,12 +502,13 @@ class FigWidget(QWidget ,FigureUI):
             - Original 勾选:保留偶数位(原始)
             - Processed 勾选:保留奇数位(处理后)
             - 两个都勾选:全部保留
+        同时返回过滤后的元信息,供生成画法列表使用。
         saveasexcel/selectsavedata 不调用此方法,仍使用完整列表。
         """
         # Input/Simulation 模式:强制隐藏 synthetic
         if not getattr(self, '_display_synthetic', True):
             if not message or len(message) != len(plotdata):
-                return outputlist, plotdataname, plotdata
+                return outputlist, plotdataname, plotdata, message
             keep_indices = [
                 i for i, info in enumerate(message)
                 if not (isinstance(info, dict) and info.get('synthetic', False))
@@ -482,6 +517,7 @@ class FigWidget(QWidget ,FigureUI):
                 [outputlist[i] for i in keep_indices],
                 [plotdataname[i] for i in keep_indices],
                 [plotdata[i] for i in keep_indices],
+                [message[i] for i in keep_indices],
             )
 
         # Filter/Processing/Fitting 模式:按 Original/Processed 复选框状态过滤
@@ -490,7 +526,7 @@ class FigWidget(QWidget ,FigureUI):
 
         # 没有 message 或长度不匹配 → 不做基于 synthetic 的过滤
         if not message or len(message) != len(plotdata):
-            return outputlist, plotdataname, plotdata
+            return outputlist, plotdataname, plotdata, message
 
         keep_indices = []
         for i, info in enumerate(message):
@@ -504,6 +540,7 @@ class FigWidget(QWidget ,FigureUI):
             [outputlist[i] for i in keep_indices],
             [plotdataname[i] for i in keep_indices],
             [plotdata[i] for i in keep_indices],
+            [message[i] for i in keep_indices],
         )
 
     def drawfigure(self):
@@ -512,15 +549,19 @@ class FigWidget(QWidget ,FigureUI):
 
         # 临时替换 self.outputlist/plotdataname/plotdata 为过滤掉 synthetic 的版本,
         # 画图结束后用 finally 恢复,这样下游 saveasexcel/selectsavedata 仍看到完整列表
-        outputlist_draw, plotdataname_draw, plotdata_draw = self._filter_synthetic_for_display(
+        outputlist_draw, plotdataname_draw, plotdata_draw, message_draw = self._filter_synthetic_for_display(
             self.outputlist, self.plotdataname, self.plotdata, self.message
         )
+        styles_draw = self._build_data_styles(message_draw, len(plotdata_draw))
         saved_outputlist, saved_plotdataname, saved_plotdata = (
             self.outputlist, self.plotdataname, self.plotdata
         )
+        saved_data_styles = self.data_styles
         self.outputlist, self.plotdataname, self.plotdata = (
             outputlist_draw, plotdataname_draw, plotdata_draw
         )
+        self.data_styles = styles_draw
+        self.mpl.set_data_styles(self.data_styles)
 
         try:
             data_type = self.figuregui.datatypeComboBox.currentText()
@@ -605,6 +646,7 @@ class FigWidget(QWidget ,FigureUI):
             self.outputlist, self.plotdataname, self.plotdata = (
                 saved_outputlist, saved_plotdataname, saved_plotdata
             )
+            self.data_styles = saved_data_styles
 
 
 
@@ -628,7 +670,10 @@ class FigWidget(QWidget ,FigureUI):
             # 如果是外部画布（对话框），需要清除之前的内容
             if canvas is not None:
                 canvas.fig.clear()
-            
+
+            # 画法依据数据元信息(与 self.plotdata 下标一一对应)
+            target_canvas.set_data_styles(self.data_styles)
+
             if data_type == 'f-Z,Phase,Re(Z),Im(Z)':
                 # 阻抗数据绘图
                 if plot_type == 'Nyquist':

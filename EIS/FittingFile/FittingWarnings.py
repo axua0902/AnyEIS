@@ -108,7 +108,7 @@ def warn_fallback(method, original_result, fallback_result,
 
     # 构造对比消息
     lines = []
-    lines.append(f"⚠️ {method} 拟合结果异常（参数误差 > 50%）")
+    lines.append(f"⚠️ {method} 拟合结果异常（参数误差 > 50% 或残差 RMS > 10%）")
     lines.append(f"已自动降级到 differential_evolution\n")
 
     # 原方法

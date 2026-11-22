@@ -16,10 +16,36 @@ plt.rcParams["font.family"] = ["DejaVu Sans", "SimHei"]
 plt.rcParams["axes.unicode_minus"] = False
 
 
-class MyMplCanvas(FigureCanvas):
-    global labelref
+# ---------------------------------------------------------------------------
+# 数据名 -> 画法判定(兜底)
+#
+# 画法的权威依据是数据元信息 dataInfo(Figure.py 依据 'fit_applied' /
+# 'filter_applied' / 'simulation' 标记判定),这里的按名判定只作为兜底。
+#
+# 旧实现用子串匹配(["Fit", "Simul", "Filt"])决定画法,数据名只要含有这些子串
+# 就被误判 —— 例如用户文件 'ECM_CPE.xlsx' 的数据名恰好是 'ECMSimulation',
+# 'FILTERDATA.xlsx' 的数据名是 'filter',都会被当成"结果曲线"画成连线,
+# 于是"用于拟合的数据"不是散点。改为后缀匹配后不会再误判。
+# ---------------------------------------------------------------------------
 
-    labelref = ["Fit", "Simul", "Filt"]
+# 拟合结果(Fitting.py:_Fitted)与滤波结果(Filter.py:_Filtered)——虚线
+_FIT_RESULT_SUFFIXES = ("_fitted", "_filtered")
+
+
+def curve_style(dataname):
+    """
+    按数据名判定画法(兜底用,权威依据是 dataInfo)。
+
+    'fit'  -> 虚线 '--'     (拟合/滤波结果)
+    'data' -> 空心圆圈散点 (用于拟合的原始数据等)
+    """
+    name = str(dataname).strip().lower()
+    if name.endswith(_FIT_RESULT_SUFFIXES):
+        return "fit"
+    return "data"
+
+
+class MyMplCanvas(FigureCanvas):
 
     def __init__(self, parent=None, width=8, height=10, dpi=100):
         self.fig = Figure(figsize=(width, height), dpi=dpi)
@@ -35,6 +61,48 @@ class MyMplCanvas(FigureCanvas):
 
         # 设置最小高度，确保绘图区域有足够的空间
         self.setMinimumHeight(400)
+
+        # 每个数据集的画法(list,与绘图时传入的数据下标一一对应);
+        # None 表示按数据名兜底判定。由 Figure.set_data_styles() 注入。
+        self.data_styles = None
+
+    def set_data_styles(self, styles):
+        """
+        设置每个数据集的画法。
+        styles: list[str],取值 'fit'(虚线)/'simul'(实线)/'data'(空心圆圈散点),
+                下标与绘图时传入的数据列表一一对应;None 表示按数据名兜底判定。
+        """
+        self.data_styles = styles
+
+    def _plot_curve(self, ax, x, y, dataname, index=None):
+        """
+        按 dataInfo 判定的画法绘制一条曲线(无 dataInfo 时按数据名兜底)。
+
+        - 拟合/滤波结果 → 虚线 "--"
+        - 仿真结果     → 实线 "-"
+        - 其余(用于拟合的原始数据等)→ 空心圆圈散点
+        """
+        style = None
+        styles = self.data_styles
+        if styles is not None and index is not None and 0 <= index < len(styles):
+            style = styles[index]
+        if style is None:
+            style = curve_style(dataname)
+
+        if style == "fit":
+            ax.plot(x, y, "--", linewidth=2, label=dataname)
+        elif style == "simul":
+            ax.plot(x, y, "-", linewidth=2, label=dataname)
+        else:
+            ax.plot(
+                x,
+                y,
+                linestyle="none",
+                marker="o",
+                markersize=5,
+                markerfacecolor="none",
+                label=dataname,
+            )
 
     def plotNormal(
         self,
@@ -122,12 +190,7 @@ class MyMplCanvas(FigureCanvas):
                     x = data[i][colname[0]]
                     y = data[i][colname[col_index]]
 
-                    if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                        ax.plot(x, y, "--", linewidth=2, label=dataname[i])
-                    elif labelref[1] in dataname[i]:
-                        ax.plot(x, y, "-", linewidth=2, label=dataname[i])
-                    else:
-                        ax.scatter(x, y, marker="x", s=10, label=dataname[i])
+                    self._plot_curve(ax, x, y, dataname[i], i)
                     has_data = True
 
         ax.set_xlabel("X", fontsize=12)
@@ -180,30 +243,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axRs.plot(
-                        data[i][colname[0]],
-                        data[i][colname[1]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axRs.plot(
-                        data[i][colname[0]],
-                        data[i][colname[1]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axRs.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[1]],
-                        marker="x",
-                        s=10,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axRs, data[i][colname[0]], data[i][colname[1]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -231,30 +273,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axbodeX.plot(
-                        data[i][colname[0]],
-                        data[i][colname[4]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axbodeX.plot(
-                        data[i][colname[0]],
-                        data[i][colname[4]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axbodeX.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[4]],
-                        marker="x",
-                        s=10,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axbodeX, data[i][colname[0]], data[i][colname[4]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -283,30 +304,9 @@ class MyMplCanvas(FigureCanvas):
                     continue
                 colname = list(data[i].columns)
 
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axPhy.plot(
-                        data[i][colname[0]],
-                        data[i][colname[2]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axPhy.plot(
-                        data[i][colname[0]],
-                        data[i][colname[2]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axPhy.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[2]],
-                        marker="x",
-                        s=10,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axPhy, data[i][colname[0]], data[i][colname[2]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -333,30 +333,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axNyquist.plot(
-                        data[i][colname[3]],
-                        data[i][colname[4]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axNyquist.plot(
-                        data[i][colname[3]],
-                        data[i][colname[4]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axNyquist.scatter(
-                        data[i][colname[3]],
-                        data[i][colname[4]],
-                        marker="x",
-                        s=10,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axNyquist, data[i][colname[3]], data[i][colname[4]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -407,30 +386,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axEps.plot(
-                        data[i][colname[0]],
-                        data[i][colname[1]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axEps.plot(
-                        data[i][colname[0]],
-                        data[i][colname[1]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axEps.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[1]],
-                        marker="x",
-                        s=50,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axEps, data[i][colname[0]], data[i][colname[1]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -458,30 +416,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axSigma.plot(
-                        data[i][colname[0]],
-                        data[i][colname[3]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axSigma.plot(
-                        data[i][colname[0]],
-                        data[i][colname[3]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axSigma.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[3]],
-                        marker="x",
-                        s=50,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axSigma, data[i][colname[0]], data[i][colname[3]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -508,30 +445,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axColeCole.plot(
-                        data[i][colname[3]],
-                        data[i][colname[4]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axColeCole.plot(
-                        data[i][colname[3]],
-                        data[i][colname[4]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axColeCole.scatter(
-                        data[i][colname[3]],
-                        data[i][colname[4]],
-                        marker="x",
-                        s=50,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axColeCole, data[i][colname[3]], data[i][colname[4]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -571,18 +487,9 @@ class MyMplCanvas(FigureCanvas):
                 eps_real_safe = np.where(np.abs(eps_real) < 1e-10, 1e-10, eps_real)
                 theta = np.arctan(eps_imag / eps_real_safe) * 180 / np.pi  # 转换为度
 
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axTheta.plot(
-                        data[i][colname[0]], theta, "--", linewidth=2, label=dataname[i]
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axTheta.plot(
-                        data[i][colname[0]], theta, "-", linewidth=2, label=dataname[i]
-                    )
-                else:
-                    self.axTheta.scatter(
-                        data[i][colname[0]], theta, marker="x", s=10, label=dataname[i]
-                    )
+                self._plot_curve(
+                    self.axTheta, data[i][colname[0]], theta, dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -626,30 +533,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axEpsIM.plot(
-                        data[i][colname[0]],
-                        data[i][colname[2]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axEpsIM.plot(
-                        data[i][colname[0]],
-                        data[i][colname[2]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axEpsIM.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[2]],
-                        marker="x",
-                        s=50,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axEpsIM, data[i][colname[0]], data[i][colname[2]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass
@@ -676,30 +562,9 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
-                if labelref[0] in dataname[i] or labelref[2] in dataname[i]:
-                    self.axSigmaIM.plot(
-                        data[i][colname[0]],
-                        data[i][colname[4]],
-                        "--",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                elif labelref[1] in dataname[i]:
-                    self.axSigmaIM.plot(
-                        data[i][colname[0]],
-                        data[i][colname[4]],
-                        "-",
-                        linewidth=2,
-                        label=dataname[i],
-                    )
-                else:
-                    self.axSigmaIM.scatter(
-                        data[i][colname[0]],
-                        data[i][colname[4]],
-                        marker="x",
-                        s=50,
-                        label=dataname[i],
-                    )
+                self._plot_curve(
+                    self.axSigmaIM, data[i][colname[0]], data[i][colname[4]], dataname[i], i
+                )
                 has_data = True
             else:
                 pass

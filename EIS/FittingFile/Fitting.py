@@ -413,7 +413,14 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
             if len(ECMfreq) != 0 and len(self.ECMparams) != 0:
                 print(f"[ECMcalculation]   开始调用auto_fitting...")
 
-                results = auto_fitting(self.ECMparams, ECMfreq, self.circuit, fit_data[i], method=fit_method, **fit_kwargs)  #########智能拟合
+                # P5 修复: 每个数据集使用独立参数副本。
+                # FittingresultsprocessECM 会把拟合值原地写回传入的
+                # Parameters; 原先多个数据集共享 self.ECMparams, 导致
+                # 上一组的拟合值串味成下一组的初值(实测酵母三组浓度
+                # 误差逐组恶化)。self.ECMparams 保持表格初值不变。
+                fit_params = self.ECMparams.copy()
+
+                results = auto_fitting(fit_params, ECMfreq, self.circuit, fit_data[i], method=fit_method, **fit_kwargs)  #########智能拟合
                 self.fittedresults.append(results)  ######拟合后结果列表
 
                 # ampgo 等方法 MinimizerResult.message 不可用，需 getattr 兜底
@@ -424,14 +431,12 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                     print(f"[ECMcalculation]   拟合结果message: (不可用，ampgo_msg={getattr(results, 'ampgo_msg', None)})")
                 print(f"[ECMcalculation]   拟合参数数量: {len(results.var_names)}")
                 print(f"[ECMcalculation]   拟合参数列表: {list(results.var_names)}")
-                # results.x 在 ampgo 路径上不存在，用 getattr 兜底
-                x_attr = getattr(results, 'x', None)
-                if x_attr is not None:
-                    print(f"[ECMcalculation]   拟合结果x: {x_attr}")
-                else:
-                    print(f"[ECMcalculation]   拟合结果x: (不可用，该方法返回 ampgo_x0={getattr(results, 'ampgo_x0', None)})")
+                # P0: result.x 对 DE/nelder 等方法是 lmfit 内部角度空间的
+                # 值(非物理参数), 改打印 result.params 中的物理参数值
+                print(f"[ECMcalculation]   拟合参数: "
+                      f"{[results.params[n].value for n in results.var_names]}")
 
-                fitteddata = FittingresultsprocessECM(self.ECMparams, ECMfreq, self.circuit, results)
+                fitteddata = FittingresultsprocessECM(fit_params, ECMfreq, self.circuit, results)
                 print(f"[ECMcalculation]   fitteddata类型: {type(fitteddata)}, 长度: {len(fitteddata) if hasattr(fitteddata, '__len__') else 'N/A'}")
 
                 self.fitteddata.append(fitteddata)  ######拟合后数据列表
@@ -678,11 +683,12 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         fit_result = self.fittedresults[dataset_index]
         print(f"[processECMResults] fit_result类型: {type(fit_result)}")
         print(f"[processECMResults] fit_result.var_names: {list(fit_result.var_names)}")
-        # ampgo 路径无 result.x，但 lmfit 已把值写入 result.params[par].value
-        fit_x = getattr(fit_result, 'x', None)
-        if fit_x is None:
-            fit_x = [fit_result.params[n].value for n in fit_result.var_names]
-        print(f"[processECMResults] fit_result.x: {fit_x}")
+        # P0 修复: 统一从 result.params 取物理参数值。
+        # lmfit 1.3.x 仅 least_squares 的 result.x 是物理值, DE/nelder 等
+        # 方法的 result.x 是内部角度空间值(写回会被钳位到边界),
+        # ampgo 路径更无 result.x。
+        fit_x = [fit_result.params[n].value for n in fit_result.var_names]
+        print(f"[processECMResults] 拟合参数: {fit_x}")
 
         # 设置表头为拟合模型
         self.tab1.setECMTableHeader('fit')
@@ -758,10 +764,8 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
 
         fit_result = self.fittedresults[dataset_index]
 
-        # ampgo 路径无 result.x，兜底从 params 里取
-        fit_x = getattr(fit_result, 'x', None)
-        if fit_x is None:
-            fit_x = [fit_result.params[n].value for n in fit_result.var_names]
+        # P0 修复: 同 processECMResults, 统一从 result.params 取物理参数值
+        fit_x = [fit_result.params[n].value for n in fit_result.var_names]
 
         # 写入初始值和拟合结果到MTtable
         for i in range(len(fit_result.var_names)):

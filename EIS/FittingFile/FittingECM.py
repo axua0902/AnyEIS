@@ -164,15 +164,16 @@ def FittingresultsprocessECM(pm,freq,circuit,result,verbose=False):
     if verbose:
         report_fit(result)
 
-    # ampgo 路径下 result.x 不存在，结果存于 result.ampgo_x0；
-    # 其它方法 lmfit 也会把 x 写到 result.params[par].value，所以优先用 params。
-    for i, name in enumerate(result.var_names):
-        x = getattr(result, 'x', None)
-        if x is not None and i < len(x):
-            pm[name].set(value=x[i])
-        else:
-            # ampgo 或其它没 x 的方法：直接用 params 里 lmfit 已写入的值
-            pm[name].set(value=result.params[name].value)
+    # P0 修复: 统一从 result.params 取物理参数值写回。
+    # lmfit 1.3.x 中仅 least_squares 的 result.x 等于物理参数值;
+    # differential_evolution / nelder / lbfgsb / powell / cg / bfgs 走
+    # penalty(apply_bounds_transformation=True) 的内部变换, result.x 处于
+    # 角度/变换空间(实测 DE 的 x ∈ [-pi/2, pi/2]), 直接写回会被 lmfit
+    # 钳位到参数边界, 拟合曲线完全错误(实测 rms_rel ≈ 100%);
+    # ampgo 路径则无 result.x。lmfit 对所有方法都会把物理值写入
+    # result.params[name].value, 因此统一用它。
+    for name in result.var_names:
+        pm[name].set(value=result.params[name].value)
 
 
     Ztotal,Zparallel=simuECM(pm,circuit,freq)
@@ -691,11 +692,26 @@ def _detect_multi_solution_risk(circuit):
     return False
 
 
-def _is_fitting_failed(result, init_params, max_error_threshold=0.5):
+def _is_fitting_failed(result, init_params, max_error_threshold=0.5,
+                       rms_residual_threshold=0.10, check_drift=True):
     """
     问题 4 修复: 判断拟合是否失败
 
-    失败特征: 至少一个参数相对误差 > 50%
+    失败特征(任一满足即判失败):
+        1. 至少一个参数相对误差 > 50%（参数漂移异常, 仅 check_drift=True 时检查）
+        2. P4 补充: 拟合残差 RMS > 10%（质量门槛）
+           least_squares 等局部方法在残差雅可比病态时(如 CPE 的 Q/n
+           强简并, 实测 cond(J)~1e15) 会停在初值附近不动 —— 参数漂移
+           为 0%, 但 chi2 很差, 仅靠参数漂移检测不到, 必须直接检查
+           拟合质量。阈值标定: 正常拟合 rms_rel ≈ 1.3%(合成数据,
+           1% 噪声) ~ 3.5%(酵母实测), 坏拟合 > 15%, 取 10% 留余量。
+           result.residual 即 fcn2min 的相对误差残差(lmfit 存的是
+           scipy 的原始残差, 不受 robust loss 缩放影响)。
+
+    check_drift=False 用于 least_squares: 漂移准则对 LS 方向是反的 ——
+    健康的 LS 拟合必然把参数从粗初值移走(实测合成数据初值偏差 ~50%
+    即被判"失败"), 而真正病态的 LS 停在初值不动(漂移≈0%)反而测不出。
+    LS 只用残差 RMS 门槛判定。
     """
     if result is None or not hasattr(result, 'params'):
         return True
@@ -711,9 +727,17 @@ def _is_fitting_failed(result, init_params, max_error_threshold=0.5):
             if abs(init_val) > 0 and np.isfinite(init_val) and np.isfinite(fit_val):
                 err = abs((fit_val - init_val) / init_val)
                 errors.append(err)
-        if not errors:
-            return False
-        return max(errors) > max_error_threshold
+        if check_drift and errors and max(errors) > max_error_threshold:
+            return True
+
+        # P4: 质量门槛 —— 拟合残差 RMS(相对误差)
+        residual = getattr(result, 'residual', None)
+        if residual is not None and np.size(residual) > 0:
+            rms = float(np.sqrt(np.mean(
+                np.asarray(residual, dtype=float) ** 2)))
+            if np.isfinite(rms) and rms > rms_residual_threshold:
+                return True
+        return False
     except Exception:
         return True
 
@@ -908,8 +932,10 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
         pm = Parameters()
 
         # ====== 问题 6: 多解性场景预判 (弹窗建议全局方法) ======
+        # P4: 白名单补上 least_squares —— 它同样是局部方法, 在多解电路
+        # (>= 2 个 p(...) 并联支路)上同样容易陷入局部最优/停在初值
         if _detect_multi_solution_risk(circuit) and method in (
-                'nelder', 'powell', 'cg', 'bfgs', 'lbfgsb'):
+                'least_squares', 'nelder', 'powell', 'cg', 'bfgs', 'lbfgsb'):
             _emit_warning(
                 f"⚠️ 当前电路可能存在多解性，{method} 是局部方法，\n"
                 f"容易陷入局部最优。\n\n"
@@ -989,9 +1015,16 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             minner = Minimizer(
                 fcn2min, pm, fcn_args=(freq, circuit, ZData),
                 **{**safe_kwargs,
-                   'ftol': 1e-15, 'xtol': 1e-15, 'gtol': 3e-16,
+                   # P2 修复: 原硬编码 diff_step=1e-15 + tr_solver='lsmr' +
+                   # ftol/xtol=1e-15 + gtol=3e-16 在残差雅可比病态时
+                   # 数值上不可用 —— 1e-15 的有限差分步长远小于双精度
+                   # 可有效分辨的范围, 数值梯度全是噪声; lsmr 迭代求解
+                   # 又进一步放大误差(实测从全局最优解出发 χ² 反而恶化
+                   # 一个数量级, 且报 success=True)。
+                   # 改为: exact 三角分解 + scipy 默认差分步长 + 1e-10 容差
+                   'ftol': 1e-10, 'xtol': 1e-10, 'gtol': 1e-10,
                    'loss': loss, 'max_nfev': int(1e5),
-                   'tr_solver': 'lsmr', 'diff_step': 1e-15}
+                   'tr_solver': 'exact', 'diff_step': None}
             )
             result = minner.minimize(method='least_squares')
         elif method in ('differential_evolution', 'dual_annealing', 'ampgo'):
@@ -1043,9 +1076,14 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
         original_chisqr = float(getattr(result, 'chisqr', float('inf'))) if result is not None else float('inf')
         fallback_used = False
 
+        # P4: 降级白名单补上 least_squares(默认方法, 多解电路下同样
+        # 需要失败降级; 原先它停在初值不动, 参数漂移检测不到, 现由
+        # _is_fitting_failed 的残差 RMS 门槛兜住)
         if (result is not None
-                and method in ('lbfgsb', 'cg', 'bfgs', 'powell', 'nelder')
-                and _is_fitting_failed(result, init_params)):
+                and method in ('least_squares', 'lbfgsb', 'cg', 'bfgs',
+                               'powell', 'nelder')
+                and _is_fitting_failed(result, init_params,
+                                       check_drift=(method != 'least_squares'))):
             # 第一阶段弹窗: 告知原方法失败, 即将降级
             _emit_fallback_warning(
                 method=method,
@@ -1057,30 +1095,52 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             print(f"  [自动降级] {method} → differential_evolution")
             # 用 DE 重试
             try:
-                de_pm = Parameters()
-                for key, value in init_params.items():
-                    if key.endswith('_min') or key.endswith('_max'):
-                        continue
-                    umin = init_params.get(f'{key}_min', None)
-                    umax = init_params.get(f'{key}_max', None)
-                    mn, mx = _compute_adaptive_bounds(
-                        value, 'differential_evolution',
-                        user_min=umin, user_max=umax)
-                    de_pm.add(key, value=value, min=mn, max=mx)
-                de_minner = Minimizer(
-                    fcn2min, de_pm, fcn_args=(freq, circuit, ZData),
-                    max_nfev=METHOD_MAX_NFEV.get('differential_evolution', int(1e5)))
-                result = de_minner.minimize(method='differential_evolution')
-                fallback_used = True
-                fallback_chisqr = float(getattr(result, 'chisqr', float('inf')))
-                # 第二阶段弹窗: 显示降级前后完整对比
-                _emit_fallback_warning(
-                    method=method,
-                    original_result=original_result,
-                    fallback_result=result,
-                    original_chisqr=original_chisqr,
-                    fallback_chisqr=fallback_chisqr,
-                )
+                # P4: 多解性/极值量级场景与主 DE 分支保持一致,
+                # 启用固定种子(rng_seed=42)多起点全局搜索;
+                # 单起点 DE 本身也可能落入局部极小
+                if _should_use_multi_start(init_params,
+                                           'differential_evolution', freq):
+                    de_result = _multi_start_with_R1_constraint(
+                        freq, prodata, circuit, init_params,
+                        'differential_evolution',
+                        n_starts=10, r1_tighten=10.0, rng_seed=42)
+                else:
+                    de_result = None
+                if de_result is None:
+                    # 单起点 DE 兜底(原降级路径)
+                    de_pm = Parameters()
+                    for key, value in init_params.items():
+                        if key.endswith('_min') or key.endswith('_max'):
+                            continue
+                        umin = init_params.get(f'{key}_min', None)
+                        umax = init_params.get(f'{key}_max', None)
+                        mn, mx = _compute_adaptive_bounds(
+                            value, 'differential_evolution',
+                            user_min=umin, user_max=umax)
+                        de_pm.add(key, value=value, min=mn, max=mx)
+                    de_minner = Minimizer(
+                        fcn2min, de_pm, fcn_args=(freq, circuit, ZData),
+                        max_nfev=METHOD_MAX_NFEV.get('differential_evolution', int(1e5)))
+                    de_result = de_minner.minimize(
+                        method='differential_evolution')
+                # P4: 仅当 DE 结果确实更优时才替换(防止降级反而变差);
+                # chisqr 两侧均为 sum(fcn2min 残差^2), 可直接比较
+                de_chisqr = float(getattr(de_result, 'chisqr', float('inf')))
+                if np.isfinite(de_chisqr) and de_chisqr < original_chisqr:
+                    result = de_result
+                    fallback_used = True
+                    fallback_chisqr = de_chisqr
+                    # 第二阶段弹窗: 显示降级前后完整对比
+                    _emit_fallback_warning(
+                        method=method,
+                        original_result=original_result,
+                        fallback_result=result,
+                        original_chisqr=original_chisqr,
+                        fallback_chisqr=fallback_chisqr,
+                    )
+                else:
+                    print(f"  [降级取消] DE χ²={de_chisqr:.4e} 不优于 "
+                          f"{method} χ²={original_chisqr:.4e}, 保留原结果")
             except Exception as e:
                 print(f"  [降级失败] {e}")
 
@@ -1090,7 +1150,9 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             'original_result': original_result if fallback_used else None,
             'original_method': original_method if fallback_used else None,
             'fallback_chain': [
-                (original_method, 'failed', original_chisqr, 'max_err>50%'),
+                (original_method, 'failed', original_chisqr,
+                 'rms>10%' if original_method == 'least_squares'
+                 else 'param_err>50% or rms>10%'),
                 ('differential_evolution', 'success',
                  float(getattr(result, 'chisqr', 0.0)), 'auto-degrade'),
             ] if fallback_used else [],

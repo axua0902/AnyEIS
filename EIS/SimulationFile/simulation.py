@@ -195,7 +195,7 @@ class Simu(ECMFunction, MTMFunction, PyTabWidget2):
         outputlist = [1]
 
         ###############仿真计算###############
-        message4 = list()  ###空数据占位
+        message4 = [{'simulation': True}]  ###标记为仿真结果(绘图时画实线,区别于用户数据)
         self.sendsignal(outputlist, plotdataname, plotdata, message4)
 
 
@@ -325,7 +325,7 @@ class Simu(ECMFunction, MTMFunction, PyTabWidget2):
             print('wrong Parameters')
             return
         ###############仿真计算###############
-        message4 = list()  ###空数据占位
+        message4 = [{'simulation': True}]  ###标记为仿真结果(绘图时画实线,区别于用户数据)
         self.sendsignal(outputlist, plotdataname, plotdata, message4)
 
 

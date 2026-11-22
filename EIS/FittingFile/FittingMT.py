@@ -148,12 +148,12 @@ def FittingMT(params,freq,modelterm,prodata,option,method='least_squares',**fit_
 def Fittingresultsprocess(pm,freq,modelterm,result,option):
     omega=2*pi*freq
 
-    # ampgo 路径无 result.x，lmfit 已把值写入 result.params[par].value
-    fit_x = getattr(result, 'x', None)
-    if fit_x is None:
-        fit_x = [result.params[n].value for n in result.var_names]
-    for i, name in enumerate(result.var_names):
-        pm[name].set(value=fit_x[i])
+    # P0 修复: 统一从 result.params 取物理参数值写回。
+    # lmfit 1.3.x 仅 least_squares 的 result.x 是物理值, DE/nelder 等
+    # 方法的 result.x 是内部角度空间值(写回会被钳位到边界), ampgo
+    # 路径更无 result.x; lmfit 对所有方法都会写入 result.params。
+    for name in result.var_names:
+        pm[name].set(value=result.params[name].value)
 
     epsfinal=fittingmodel(pm,omega,modelterm,option) 
     results3=creatdatabase(freq,epsfinal)
