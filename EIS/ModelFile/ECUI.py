@@ -508,6 +508,28 @@ class Tab1Content(QWidget):
         self.clearBtn.setMinimumWidth(100)
         self.calculationRowLayout.addWidget(self.clearBtn)
 
+        # 数据集选择下拉框(存在多组拟合数据时显示, 用于切换 ECMtable 显示的数据集)
+        # self.datasetLabel = PyLabel2(
+        #     text="Dataset:",
+        #     color=self.themes["app_color"]["text_foreground"],
+        #     font_size=self.settings["font"]["text_size_small"],
+        #     font_family=self.settings["font"]["family"],
+        # )
+        # self.datasetLabel.setVisible(False)
+        # self.calculationRowLayout.addWidget(self.datasetLabel)
+
+        self.datasetComboBox = PyComboBox2(
+            color=self.themes["app_color"]["text_foreground"],
+            radius=4,
+            font_size=self.settings["font"]["text_size_normal"],
+            min_height=35,
+            bg_color=self.themes["app_color"]["bg_two"],
+            bg_color_hover=self.themes["app_color"]["light_three"],
+            border_color=self.themes["app_color"]["light_three"],
+        )
+        self.datasetComboBox.setVisible(False)
+        self.calculationRowLayout.addWidget(self.datasetComboBox)
+
         self.calculationRowLayout.addStretch()
         self.parameterSectionLayout.addWidget(self.calculationRow)
 

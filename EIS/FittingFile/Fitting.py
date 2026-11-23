@@ -170,6 +170,8 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.tab1.saveModelBtn.clicked.connect(self.saveECMModel)
         self.tab1.saveasModelBtn.clicked.connect(self.saveasECMModel)
         self.tab1.clearModelBtn.clicked.connect(self.clearECMModel)
+        # 数据集下拉框: 切换 ECMtable 显示的拟合结果所在数据集
+        self.tab1.datasetComboBox.currentIndexChanged.connect(self.on_ecm_dataset_changed)
 
         # Tab2 (MT) button connections
         self.tab2.addtermBtn.clicked.connect(self.addterm)
@@ -478,6 +480,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         print(f"[ECMcalculation] 调用processECMResults...")
         self.processECMResults()
 
+        # 按拟合数据集数量重建数据集下拉框(多组数据时可切换 ECMtable 显示内容)
+        self.update_ecm_dataset_selector()
+
         print(f"[ECMcalculation] 调用sendsignal发送数据(第 4 参数改为 dataInfo)...")
         # 第 4 参数原本是 fittedresults,改为 resultsdataInfo 以便下游 Figure 识别 synthetic 标签
         self.sendsignal(outputlist, plotdataname, ECMoutputdata, self.resultsdataInfo)
@@ -495,6 +500,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.fitteddata = list()
         self.fittedresults = list()
         self.resultsdataInfo = []
+
+        # 清空数据集下拉框
+        self.update_ecm_dataset_selector(0)
 
         # 清空全局 plot 副本（仅清拟合期追加的部分；原始数据由导入流程维护）
         try:
@@ -740,6 +748,44 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
             print(f"[processECMResults]   已写入误差到表格")
 
         # 注意：整体拟合效果表格由 FittingSetRes.py 的getsingal 信号处理
+
+    def update_ecm_dataset_selector(self, count=None):
+        """
+        按拟合数据集数量重建 ECM 页的数据集下拉框
+
+        参数:
+            count: 数据集数量, None表示取自 self.fittedresults
+        """
+        if count is None:
+            count = len(self.fittedresults) if self.fittedresults else 0
+
+        combo = self.tab1.datasetComboBox
+        combo.blockSignals(True)
+        combo.clear()
+        for i in range(count):
+            combo.addItem(f"Dataset {i + 1}")
+        if count > 0:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+        # 单个数据集时无需切换, 隐藏下拉框
+        visible = count > 1
+        combo.setVisible(visible)
+        print(f"[update_ecm_dataset_selector] 数据集数量: {count}, 下拉框可见: {visible}")
+
+    def on_ecm_dataset_changed(self, index):
+        """
+        切换 ECM 结果表格显示的数据集
+
+        参数:
+            index: 数据集索引
+        """
+        if index < 0:
+            return
+        if not self.fittedresults or index >= len(self.fittedresults):
+            return
+        print(f"[on_ecm_dataset_changed] 切换到数据集: {index}")
+        self.processECMResults(index)
 
     def processMTResults(self, dataset_index=None):
         """

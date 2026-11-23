@@ -39,6 +39,8 @@ class Ui_FittingPage(object):
         
         # 建立连接引用
         self.FittingWg.set_setting_widget(self.settingWg)
+        # 结果区仅持有 Fitting 控件引用, 用于读取 lmfit 拟合结果(不改变信号的数据传递方式)
+        self.resultsWg.set_fitting_widget(self.FittingWg)
 
 
         # 左侧区域 - 数据输入和拟合处理

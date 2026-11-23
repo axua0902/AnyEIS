@@ -23,6 +23,10 @@ global outputlist
 global globalfileslist
 global globalchosedfileslist
 
+# 拟合后数据(2N 交错:原始0, 拟合0, 原始1, 拟合1, ...)与 lmfit 拟合结果(每个数据集一个)
+prodata = list()
+fittedresults = list()
+
 # import numpy as np
 # import matplotlib.pyplot as plt
 
@@ -90,6 +94,76 @@ class resultWidget(QWidget):  ############输出仿真结果
         # 连接数据集选择器信号
         self.resultsui.datasetSelector.currentIndexChanged.connect(self.on_dataset_selector_changed)
 
+        # Fitting 控件引用(仅用于读取 lmfit 拟合结果, 不改变信号的数据传递方式)
+        self.fitting_widget = None
+        # lmfit 拟合结果(每个数据集一条)
+        self.fit_results = list()
+        # 当前数据集数量(由实际数据推算)
+        self.dataset_count = 0
+
+    def set_fitting_widget(self, widget):
+        """记录 Fitting 控件引用, 便于读取 lmfit 拟合结果(信号载荷保持不变)"""
+        self.fitting_widget = widget
+
+    def _collect_fit_results(self, message4):
+        """
+        获取 lmfit 拟合结果列表(每个数据集一条 MinimizerResult)
+
+        信号第 4 参数现为 dataInfo(2N), 不含 lmfit 结果, 因此:
+        1) 优先从 Fitting 控件的 fittedresults 读取(通过控件引用, 不改动信号);
+        2) 兼容旧载荷: 第 4 参数本身就是 lmfit 结果列表。
+        """
+        widget = self.fitting_widget
+        if widget is not None:
+            results = getattr(widget, 'fittedresults', None)
+            if results:
+                return list(results)
+        if message4 and all(hasattr(item, 'params') for item in message4):
+            return list(message4)
+        return list()
+
+    def _infer_dataset_count(self, inputdata, data_info, fit_results):
+        """
+        根据已传递的数据推算真实的数据集数量 N(不改变信号的数据传递方式)
+
+        可用依据:
+        - 原始数据 / 拟合后数据: inputdata 为 2N 交错数据帧, dataInfo 中 synthetic 标签区分原始与拟合
+        - 误差指标: 每个数据集对应一条 lmfit 拟合结果(nfev / chisqr / red_chisqr / bic 等)
+        """
+        n_results = len(fit_results) if fit_results else 0
+
+        n_original = 0
+        n_fitted = 0
+        for info in data_info:
+            if isinstance(info, dict) and info.get('synthetic', False):
+                n_fitted += 1
+            else:
+                n_original += 1
+
+        n_pairs = (len(inputdata) // 2) if inputdata and len(inputdata) % 2 == 0 else 0
+
+        counts = {
+            '误差指标(lmfit结果)': n_results,
+            '原始数据': n_original,
+            '拟合后数据': n_fitted,
+            '数据帧对': n_pairs,
+        }
+        candidates = [c for c in counts.values() if c > 0]
+        if not candidates:
+            return 0
+
+        # 以误差指标数量(每个数据集一条拟合结果)为准, 其次按原始/拟合数据数量
+        count = 0
+        for value in (n_results, n_original, n_fitted, n_pairs):
+            if value > 0:
+                count = value
+                break
+
+        if len(set(candidates)) > 1:
+            print(f'[getsingal] 警告: 数据集数量推断不一致 {counts}, 采用 {count}')
+        print(f'[getsingal] 数据集数量推算: {counts} -> {count}')
+        return count
+
     def getsingal(self, message1, inputdataname, inputdata, message4):
         global outputlist
         print('接收outputlist process')
@@ -103,26 +177,38 @@ class resultWidget(QWidget):  ############输出仿真结果
         print('接收plotdata process')
         prodata = inputdata
 
+        # 第 4 参数为输出数据信息 dataInfo(2N, 奇数位带 synthetic 标签)
+        self.data_info = list(message4) if message4 else []
+
+        # lmfit 拟合结果(每个数据集一条)
+        fit_results = self._collect_fit_results(message4)
+        self.fit_results = fit_results
+
         global fittedresults
-        print('接收fittedresults')
-        fittedresults = message4
-        
+        fittedresults = fit_results
+
         print(f"[getsingal] outputlist: {outputlist}")
         print(f"[getsingal] prodataname: {prodataname}")
         print(f"[getsingal] inputdata长度: {len(inputdata) if inputdata else 0}")
-        print(f"[getsingal] fittedresults长度: {len(fittedresults) if fittedresults else 0}")
+        print(f"[getsingal] dataInfo长度: {len(self.data_info)}")
+        print(f"[getsingal] fittedresults长度: {len(fit_results)}")
+
+        # 数据集数量由原始数据/拟合后数据/误差指标数量推算
+        n_datasets = self._infer_dataset_count(inputdata, self.data_info, fit_results)
+        self.dataset_count = n_datasets
 
         self.update_results_table()
 
         # 更新整体拟合效果表格
-        if fittedresults and len(fittedresults) > 0:
-            # 设置数据集选择器
-            n_datasets = len(fittedresults)
+        if n_datasets > 0:
+            # 设置数据集选择器(条目数 = 实际数据集数)
             self.resultsui.setDatasetSelectorVisible(n_datasets > 1, n_datasets)
 
             # 获取选中的数据集索引
             dataset_index = self.resultsui.getSelectedDatasetIndex()
             if dataset_index < 0:
+                dataset_index = 0
+            if dataset_index >= n_datasets:
                 dataset_index = 0
 
             Z_data = None
@@ -131,10 +217,11 @@ class resultWidget(QWidget):  ############输出仿真结果
             print(f"[getsingal] dataset_index: {dataset_index}")
             print(f"[getsingal] prodata长度: {len(prodata) if prodata else 0}")
 
-            # 根据数据类型获取原始数据
-            if prodata and len(prodata) > dataset_index:
-                data_dict = prodata[dataset_index]
-                print(f"[getsingal] prodata[{dataset_index}]类型: {type(data_dict)}")
+            # 原始数据在交错数组的偶数位置: [原始0, 拟合0, 原始1, 拟合1, ...]
+            orig_index = dataset_index * 2
+            if prodata and len(prodata) > orig_index:
+                data_dict = prodata[orig_index]
+                print(f"[getsingal] prodata[{orig_index}]类型: {type(data_dict)}")
                 # 检测数据类型：MT数据包含 epsRE[-]，ECM数据包含 Rs[ohm]
                 if 'epsRE[-]' in data_dict.columns:
                     # MT数据格式：使用 epsRE 和 sigmaRE
@@ -162,7 +249,8 @@ class resultWidget(QWidget):  ############输出仿真结果
                         Z_fitted = fitted_dict['epsRE[-]'].values + 1j * fitted_dict['sigmaRE[S/m]'].values
                         print(f"[getsingal] Z_fitted(MT)构建成功: {Z_fitted[:3]}...")
 
-            self.update_overall_results_table(fittedresults[dataset_index], Z_data, Z_fitted, dataset_index)
+            fit_result = fit_results[dataset_index] if dataset_index < len(fit_results) else None
+            self.update_overall_results_table(fit_result, Z_data, Z_fitted, dataset_index)
 
     def update_results_table(self, dataset_index=0):
         """
@@ -174,11 +262,15 @@ class resultWidget(QWidget):  ############输出仿真结果
         table = self.resultsui.resultstable
         table.setRowCount(0)
 
+        fit_results = self.fit_results
+        if not fit_results:
+            return
+
         # 确保索引有效
-        if dataset_index < 0 or dataset_index >= len(fittedresults):
+        if dataset_index < 0 or dataset_index >= len(fit_results):
             dataset_index = 0
 
-        result = fittedresults[dataset_index]
+        result = fit_results[dataset_index]
         if not hasattr(result, 'params'):
             return
 
@@ -249,7 +341,11 @@ class resultWidget(QWidget):  ############输出仿真结果
         参数:
             index: 选择的数据集索引
         """
-        if index < 0 or index >= len(fittedresults):
+        if index < 0 or index >= self.dataset_count:
+            return
+
+        fit_results = self.fit_results
+        if not fit_results or index >= len(fit_results):
             return
 
         # 更新参数结果表格
@@ -258,8 +354,10 @@ class resultWidget(QWidget):  ############输出仿真结果
         # 更新整体拟合效果表格
         Z_data = None
         Z_fitted = None
-        if prodata and len(prodata) > index:
-            data_dict = prodata[index]
+        # prodata 为交错排列: [原始数据0, 拟合数据0, 原始数据1, 拟合数据1, ...]
+        orig_index = index * 2
+        if prodata and len(prodata) > orig_index:
+            data_dict = prodata[orig_index]
             # 检测数据类型：MT数据包含 epsRE[-]，ECM数据包含 Rs[ohm]
             if 'epsRE[-]' in data_dict.columns:
                 # MT数据格式
@@ -272,7 +370,6 @@ class resultWidget(QWidget):  ############输出仿真结果
         # 获取拟合数据 - prodata是交错排列的[原始数据, 拟合数据, 原始数据, 拟合数据, ...]
         # Z_fitted应该在prodata的奇数索引位置
         fitted_index = index * 2 + 1
-        Z_fitted = None
         if prodata and len(prodata) > fitted_index:
             fitted_dict = prodata[fitted_index]
             if hasattr(fitted_dict, 'columns'):
@@ -281,7 +378,7 @@ class resultWidget(QWidget):  ############输出仿真结果
                 elif 'epsRE[-]' in fitted_dict.columns:
                     Z_fitted = fitted_dict['epsRE[-]'].values + 1j * fitted_dict['sigmaRE[S/m]'].values
 
-        self.update_overall_results_table(fittedresults[index], Z_data, Z_fitted, index)
+        self.update_overall_results_table(fit_results[index], Z_data, Z_fitted, index)
 
 
 class bottomLWidget(QWidget):

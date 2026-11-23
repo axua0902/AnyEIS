@@ -361,18 +361,17 @@ class resultsUI():
 
         参数:
             visible: 是否可见
-            count: 数据集数量
+            count: 数据集数量(由调用方根据原始数据/拟合后数据/误差指标数量推算)
         """
         self.datasetSelectorLabel.setVisible(visible)
         self.datasetSelector.setVisible(visible)
 
-        if visible and count > 0:
-            # 填充下拉框选项
-            self.datasetSelector.clear()
-            for i in range(count):
-                self.datasetSelector.addItem(f"Dataset {i + 1}")
-            if count > 1:
-                self.datasetSelector.setCurrentIndex(0)
+        # 按实际数据集数量重建下拉项, 避免残留上一次的选项
+        self.datasetSelector.clear()
+        for i in range(count):
+            self.datasetSelector.addItem(f"Dataset {i + 1}")
+        if count > 0:
+            self.datasetSelector.setCurrentIndex(0)
 
     def getSelectedDatasetIndex(self):
         """
