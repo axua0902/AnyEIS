@@ -46,40 +46,47 @@ MT_RESULT_HEADERS = ['Dataset', 'NFev', 'NData', 'RMS rel err (%)',
                      "RMS(ε') (%)", "RMS(σ') (%)", 'Max rel err (%)',
                      'Reduced χ²', 'BIC', 'NParam']
 
-# 各列量的 tooltip(英文, 说明计算方法与判读方式), 鼠标悬停表头时显示
+# 各列量的 tooltip(英文, 公式 + 判读, 每行一短句), 鼠标悬停表头时显示;
+# '\n' 为显式换行, 避免悬停时出现特别长的单行影响阅读
 RESULT_HEADER_TOOLTIPS = {
-    'Dataset': 'Current dataset index (view each group when batch-fitting '
-               'multiple datasets)',
-    'NFev': 'Number of objective-function evaluations (excludes the HN '
-            'grid-scan stage). Workload indicator: > ~2000 usually indicates '
-            'model mismatch or poor initial values',
-    'NData': 'Number of observations used in the fit: ECM = number of frequency '
-             'points N; MT = 2N (N each for the ε′/σ′ channels)',
-    'RMS rel err (%)': '100·sqrt(chisqr/NData). Residuals are per-point relative '
-                       'errors (ECM: |ΔZ|/|Z|; MT: per-channel ε′/σ′), i.e. the '
-                       'average relative deviation. Primary metric: compare against '
-                       'the measurement noise level (much higher than noise = '
-                       'mismatch; much lower = possible overfitting)',
-    'R²': '1 − Σ|Z_data−Z_fit|² / Σ|Z_data−mean(Z_data)|² (impedance scale). '
-          'Dominated by low-frequency |Z| points; sanity check only, do not '
-          'judge fit quality from R² alone',
-    'RMSE (Ω)': 'sqrt(Σ|Z_data−Z_fit|²/NData), absolute error in ohms. '
-                'Scale-dependent: compare only between models on the same dataset',
-    "RMS(ε') (%)": "100·sqrt(mean(first N residuals²)), relative RMS of the ε′ "
-                   "(real permittivity) channel; locates which channel is mismatched",
-    "RMS(σ') (%)": "100·sqrt(mean(last N residuals²)), relative RMS of the σ′ "
-                   "(real conductivity) channel; locates which channel is mismatched",
-    'Max rel err (%)': '100·max(|residual|), worst single point/channel relative '
-                       'deviation; reveals local mismatch hidden by the RMS average',
-    'Reduced χ²': 'chisqr/(NData−NParam), RMS rel err rescaled by degrees of '
-                 'freedom. Note: residuals are relative errors, not 1/σ-weighted '
-                 '— do not use the textbook “≈1 means good” rule; compare against '
-                 'the noise-scaled baseline instead',
-    'BIC': 'NData·ln(RSS/NData)+NParam·ln(NData). Model selection: pick the lowest '
-           'among models on the same dataset (ΔBIC > 10 is decisive); not '
-           'comparable across datasets or between ECM and MT',
-    'NParam': 'Number of free parameters, len(var_names). Context for judging '
-              'overfitting and interpreting the BIC complexity penalty',
+    'Dataset': 'Current dataset index.\n'
+               'Browse each group when batch-fitting multiple datasets.',
+    'NFev': 'Number of objective-function evaluations\n'
+            '(excludes the HN grid-scan stage).\n'
+            'Workload indicator: > ~2000 suggests model mismatch\n'
+            'or poor initial values.',
+    'NData': 'Observations used in the fit.\n'
+             'ECM: number of frequency points N.\n'
+             'MT: 2N (N per ε′/σ′ channel).',
+    'RMS rel err (%)': '100·sqrt(chisqr/NData).\n'
+                       'Residuals are per-point relative errors\n'
+                       '(ECM: |ΔZ|/|Z|; MT: per-channel ε′/σ′).\n'
+                       'Primary metric: compare against the noise level\n'
+                       '(much higher = mismatch; much lower = overfitting).',
+    'R²': '1 − Σ|Z_data−Z_fit|² / Σ|Z_data−mean(Z_data)|².\n'
+          'Impedance scale, dominated by low-|Z| points.\n'
+          'Sanity check only.',
+    'RMSE (Ω)': 'sqrt(Σ|Z_data−Z_fit|²/NData), in ohms.\n'
+                'Scale-dependent: compare only between models\n'
+                'on the same dataset.',
+    "RMS(ε') (%)": "100·sqrt(mean(first N residuals²)).\n"
+                   "Relative RMS of the ε′ (permittivity) channel;\n"
+                   "locates which channel is mismatched.",
+    "RMS(σ') (%)": "100·sqrt(mean(last N residuals²)).\n"
+                   "Relative RMS of the σ′ (conductivity) channel;\n"
+                   "locates which channel is mismatched.",
+    'Max rel err (%)': '100·max(|residual|).\n'
+                       'Worst single-point relative deviation;\n'
+                       'reveals local mismatch hidden by the RMS average.',
+    'Reduced χ²': 'chisqr/(NData−NParam).\n'
+                  'Residuals are relative errors, not 1/σ-weighted:\n'
+                  'the “≈1 means good” rule does not apply.',
+    'BIC': 'NData·ln(RSS/NData)+NParam·ln(NData).\n'
+           'Model selection: lowest wins on the same dataset\n'
+           '(ΔBIC > 10 is decisive); not comparable across datasets\n'
+           'or between ECM and MT.',
+    'NParam': 'Number of free parameters, len(var_names).\n'
+              'Context for overfitting and the BIC penalty.',
 }
 
 
