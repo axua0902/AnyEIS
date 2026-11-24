@@ -42,11 +42,11 @@ def emit_warning(message, level='warning', title=None):
     返回:
         bool: True=用户确认, False=用户取消
     """
-    title = title or f'拟合建议 - {level.upper()}'
+    title = title or f'Fitting Notice / 拟合提示 - {level.upper()}'
 
     if _SILENT_MODE:
-        # 静默模式: 仅打印
-        prefix = {'info': 'ℹ️', 'warning': '⚠️ ', 'critical': '❌'}.get(level, '⚠️ ')
+        # 静默模式: 仅打印 (ASCII 前缀, 避免 GBK 控制台编码错误)
+        prefix = {'info': '[INFO]', 'warning': '[WARN]', 'critical': '[ERROR]'}.get(level, '[WARN]')
         print(f"\n{prefix} [{title}]")
         print(f"  {message}\n")
         return True
@@ -67,13 +67,13 @@ def emit_warning(message, level='warning', title=None):
         return ret == QMessageBox.StandardButton.Ok
     except ImportError:
         # 无 PySide6: 回退到控制台
-        prefix = {'info': 'ℹ️', 'warning': '⚠️ ', 'critical': '❌'}.get(level, '⚠️ ')
+        prefix = {'info': '[INFO]', 'warning': '[WARN]', 'critical': '[ERROR]'}.get(level, '[WARN]')
         print(f"\n{prefix} [{title}]")
         print(f"  {message}\n")
         return True
     except Exception as e:
         # GUI 不可用: 回退到控制台
-        print(f"\n⚠️  [{title}] (弹窗失败: {e})")
+        print(f"\n[WARN] [{title}] (popup failed / 弹窗失败: {e})")
         print(f"  {message}\n")
         return True
 
@@ -104,15 +104,16 @@ def warn_fallback(method, original_result, fallback_result,
         - 降级方法参数 + χ²
         - 自动使用降级结果
     """
-    title = f"拟合失败自动降级 - {method}"
+    title = f"Auto Fallback / 拟合降级 - {method}"
 
-    # 构造对比消息
+    # 构造对比消息 (英汉双语, 简洁)
     lines = []
-    lines.append(f"⚠️ {method} 拟合结果异常（参数误差 > 50% 或残差 RMS > 10%）")
-    lines.append(f"已自动降级到 differential_evolution\n")
+    lines.append(f"[WARN] {method} fit abnormal (param error > 50% or RMS > 10%)")
+    lines.append(f"{method} 拟合结果异常（参数误差>50% 或残差RMS>10%）")
+    lines.append(f"Switched to differential_evolution / 已自动降级至 differential_evolution\n")
 
     # 原方法
-    lines.append(f"【原方法】{method}")
+    lines.append(f"【Original / 原方法】{method}")
     lines.append(f"  χ² = {original_chisqr:.3e}")
     if original_result is not None and hasattr(original_result, 'params'):
         for name in original_result.params:
@@ -122,14 +123,14 @@ def warn_fallback(method, original_result, fallback_result,
             true_val = true_params.get(name) if true_params else None
             if true_val is not None and true_val != 0:
                 err = abs((val - true_val) / true_val) * 100
-                lines.append(f"  {name} = {val:.4g} (真实 {true_val:.4g}, 误差 {err:.1f}%)")
+                lines.append(f"  {name} = {val:.4g} (true/真实 {true_val:.4g}, err/误差 {err:.1f}%)")
             else:
                 lines.append(f"  {name} = {val:.4g}")
 
     lines.append("")
 
     # 降级方法
-    lines.append(f"【降级后】differential_evolution")
+    lines.append(f"【Fallback / 降级后】differential_evolution")
     lines.append(f"  χ² = {fallback_chisqr:.3e}")
     if fallback_result is not None and hasattr(fallback_result, 'params'):
         for name in fallback_result.params:
@@ -139,12 +140,12 @@ def warn_fallback(method, original_result, fallback_result,
             true_val = true_params.get(name) if true_params else None
             if true_val is not None and true_val != 0:
                 err = abs((val - true_val) / true_val) * 100
-                lines.append(f"  {name} = {val:.4g} (真实 {true_val:.4g}, 误差 {err:.1f}%)")
+                lines.append(f"  {name} = {val:.4g} (true/真实 {true_val:.4g}, err/误差 {err:.1f}%)")
             else:
                 lines.append(f"  {name} = {val:.4g}")
 
     lines.append("")
-    lines.append("✅ 已自动使用 differential_evolution")
+    lines.append("[OK] differential_evolution result adopted / 已采用 differential_evolution 结果")
 
     message = "\n".join(lines)
     return emit_warning(message, 'warning', title)
@@ -153,10 +154,10 @@ def warn_fallback(method, original_result, fallback_result,
 if __name__ == '__main__':
     # 自测试
     set_silent_mode(True)
-    print("测试 1: 普通警告")
-    warn("Nelder 在宽边界下不稳定,建议使用紧边界。")
-    print("\n测试 2: 严重错误")
-    critical("拟合完全失败,无法继续!")
-    print("\n测试 3: 信息")
-    info("已使用 differential_evolution 完成拟合。")
-    print("\n所有测试完成。")
+    print("Test 1 / 测试 1: warning / 普通警告")
+    warn("Nelder unstable with wide bounds; use tight bounds.\nNelder 宽边界下不稳定，建议使用紧边界。")
+    print("\nTest 2 / 测试 2: critical / 严重错误")
+    critical("Fitting failed completely.\n拟合完全失败!")
+    print("\nTest 3 / 测试 3: info / 信息")
+    info("Fitting completed with differential_evolution.\n已用 differential_evolution 完成拟合。")
+    print("\nAll tests done / 所有测试完成。")
