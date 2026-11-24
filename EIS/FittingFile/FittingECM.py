@@ -22,6 +22,11 @@ Created on Fri Sep 28 15:18:49 2018
 import sys
 sys.path.append('..')
 
+import os
+import io
+import contextlib
+from concurrent.futures import ProcessPoolExecutor
+
 import numpy as np
 from numpy import pi, real, imag, angle, sqrt
 from pandas import DataFrame, Series
@@ -148,6 +153,13 @@ def FittingECM(params, freq, circuit, prodata, method='least_squares', **fit_kwa
         prodata: 包含 'Rs[ohm]' 和 'X[ohm]' 的 DataFrame
         method: 优化算法名称（默认 'least_squares'）
         **fit_kwargs: 其他拟合参数
+            可选引擎级控制参数（不透传给 scipy，仅全局方法生效）:
+                n_jobs  : 多解性多起点并行进程数（默认 None = 按机器核数
+                          自适应，1 = 串行）。并行与串行结果逐位一致，
+                          不损失拟合精度
+                de_seed : 确定性种子。传入后整个拟合过程可复现，且结果
+                          与并行进程数/机器核数无关（GUI 生产路径固定
+                          传入，保证任意机器上结果逐位一致）
 
     返回:
         lmfit Result 对象
@@ -768,9 +780,177 @@ def _compute_magnitude_range(init_params):
     return np.log10(max(param_vals)) - np.log10(min(param_vals))
 
 
+# =============================================================================
+# A2 优化: 并行拟合基础设施（自适应进程数 + 多起点并行 + 数据集级批量并行）
+# =============================================================================
+_ENGINE_POOL = None
+_ENGINE_POOL_WORKERS = 0
+
+
+def _auto_n_jobs(user=None, n_tasks=None):
+    """自适应并行进程数（根据计算机实际情况使用不同核数）
+
+    优先级:
+        1. user 显式传入的进程数（None 表示自动）
+        2. 环境变量 ANYEIS_FIT_WORKERS（'0'/'1' = 强制串行）
+        3. CPU 逻辑核数 - 1（预留 1 核给系统/GUI），不超过任务数 n_tasks
+    环境变量 ANYEIS_FIT_PARALLEL=0 可完全关闭并行（返回 1）。
+
+    返回值只影响速度，不影响任何拟合结果（确定性播种保证结果
+    与并行进程数无关）。
+    """
+    env = os.environ.get('ANYEIS_FIT_PARALLEL', '1').strip().lower()
+    if env in ('0', 'false', 'no', 'off'):
+        return 1
+    val = user
+    env_w = os.environ.get('ANYEIS_FIT_WORKERS', '').strip()
+    if val is None and env_w:
+        try:
+            val = int(env_w)
+        except ValueError:
+            pass
+    if val is not None:
+        return max(1, int(val))
+    try:
+        cpu = os.cpu_count() or 1
+    except Exception:
+        cpu = 1
+    workers = max(1, cpu - 1)
+    if n_tasks is not None:
+        workers = min(workers, int(n_tasks))
+    return max(1, workers)
+
+
+def _engine_pool(n_jobs):
+    """惰性创建/复用引擎级进程池；不可用时返回 None
+
+    进程池在所有并行入口（多起点并行、数据集级批量并行）间共享。
+    并行执行与串行执行结果逐位一致（确定性播种），因此进程池
+    不可用时回退串行不影响任何结果。
+
+    注: PyInstaller 冻结环境需在程序入口调用 multiprocessing.freeze_support()
+    （main.py 已添加），否则应设 ANYEIS_FIT_PARALLEL=0 关闭并行。
+    """
+    global _ENGINE_POOL, _ENGINE_POOL_WORKERS
+    n_jobs = max(1, int(n_jobs))
+    if _ENGINE_POOL is None or _ENGINE_POOL_WORKERS < n_jobs:
+        try:
+            if _ENGINE_POOL is not None:
+                _ENGINE_POOL.shutdown(wait=False)
+            _ENGINE_POOL = ProcessPoolExecutor(max_workers=n_jobs)
+            _ENGINE_POOL_WORKERS = n_jobs
+        except Exception:
+            _ENGINE_POOL, _ENGINE_POOL_WORKERS = None, 0
+            return None
+    return _ENGINE_POOL
+
+
+def _start_seed(rng_seed, de_seed, i):
+    """由 (rng_seed, de_seed, 起点序号) 派生每个起点的确定性随机种子
+
+    种子确定 ⇒ 单个起点的 DE 求解只依赖自己的种子，与执行顺序、
+    串行/并行方式均无关，因此并行结果与串行逐位一致，且同一环境下
+    重复运行逐位可复现。
+    """
+    return (int(rng_seed) * 100003 + int(de_seed) * 7919
+            + int(i) * 104729) % (2 ** 31 - 1)
+
+
+def _multistart_worker(payload):
+    """多起点并行的 worker：独立完成单个起点的全局拟合
+
+    payload: (i, R1_start, spec, freq, circuit, ZData, method,
+              max_nfev, start_seed)
+        spec: [(name, value, min, max), ...]（顺序即参数添加顺序）
+    返回: (i, chisqr, lmfit Result 或 None)
+    """
+    i, R1_start, spec, freq, circuit, ZData, method, max_nfev, seed = payload
+    _worker_set_silent()
+    pm = Parameters()
+    for name, val, pmin, pmax in spec:
+        pm.add(name, value=val, min=pmin, max=pmax)
+    if seed is not None:
+        np.random.seed(seed)
+    try:
+        minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                           max_nfev=max_nfev)
+        r = minner.minimize(method=method)
+        return i, float(getattr(r, 'chisqr', float('inf'))), r
+    except Exception:
+        return i, float('inf'), None
+
+
+def _worker_set_silent():
+    """在并行 worker 子进程中关闭 Qt 弹窗警告
+
+    Windows spawn 下 worker 重新导入模块，静默标志回到默认 False；
+    worker 无 QApplication 时弹窗会使进程终止，故必须重新启用。
+    静默模式仅把警告改为打印，不影响任何拟合数值。
+    """
+    try:
+        try:
+            from EIS.FittingFile.FittingWarnings import set_silent_mode
+        except ImportError:
+            try:
+                from .FittingWarnings import set_silent_mode
+            except ImportError:
+                from FittingWarnings import set_silent_mode
+        set_silent_mode(True)
+    except Exception:
+        pass
+
+
+def _dataset_fit_worker(task):
+    """数据集级批量并行 worker：完成单个数据集的完整智能拟合
+
+    task: (params, freq, circuit, prodata, method, fit_kwargs)
+    返回: lmfit Result；失败返回 None（由调用方回退串行重算）。
+    """
+    params, freq, circuit, prodata, method, fit_kwargs = task
+    _worker_set_silent()
+    de_seed = fit_kwargs.get('de_seed')
+    if de_seed is not None:
+        np.random.seed(int(de_seed))
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return auto_fitting(params, freq, circuit, prodata,
+                                method=method, **fit_kwargs)
+    except Exception:
+        return None
+
+
+def parallel_fit_datasets(tasks, n_jobs=None):
+    """数据集级批量并行拟合（GUI 多数据集批量拟合加速入口）
+
+    tasks: [(params, freq, circuit, prodata, method, fit_kwargs), ...]
+        注: task 内的 fit_kwargs 应传 n_jobs=1，避免 worker 内嵌套进程池。
+    返回: 与 tasks 顺序一致的 Result 列表；任一数据集失败或并行
+          不可用时返回 None（调用方回退串行逐个拟合）。
+    """
+    n = len(tasks)
+    if n <= 1:
+        return None
+    n_jobs = _auto_n_jobs(n_jobs, n_tasks=n)
+    if n_jobs <= 1:
+        return None
+    pool = _engine_pool(n_jobs)
+    if pool is None:
+        print("[批量并行拟合] 进程池不可用，回退串行")
+        return None
+    try:
+        results = list(pool.map(_dataset_fit_worker, tasks))
+    except Exception as e:
+        print(f"[批量并行拟合失败: {type(e).__name__}: {str(e)[:60]}]，回退串行")
+        return None
+    if any(r is None for r in results):
+        print("[批量并行拟合] 存在失败数据集，回退串行")
+        return None
+    return results
+
+
 def _multi_start_with_R1_constraint(freq, prodata, circuit, init_params,
                                       method, n_starts=10, r1_tighten=10.0,
-                                      rng_seed=42):
+                                      rng_seed=42, de_seed=None, n_jobs=1):
     """
     多起点 + R1_est 物理约束的全局搜索（用于多解性/极值量级场景）
 
@@ -790,6 +970,13 @@ def _multi_start_with_R1_constraint(freq, prodata, circuit, init_params,
         n_starts: 起点数量（默认 10）
         r1_tighten: R1 边界相对 R1_est 的倍数（默认 10 即 ±1 数量级）
         rng_seed: 随机种子（保证可复现）
+        de_seed: 外层种子（可选）。传入时每个起点用
+            _start_seed(rng_seed, de_seed, i) 确定性播种，使每个起点的
+            求解与执行顺序无关 —— 这是启用并行(n_jobs>1)的前提。
+            不传时保持原有行为（DE 消费全局 RNG 流、串行执行），
+            与历史版本逐位兼容（GUI 默认路径不受影响）。
+        n_jobs: 内层起点并行进程数（默认 1 串行）。仅当 de_seed
+            非空时生效；并行与串行结果逐位一致。
 
     返回:
         lmfit Result 对象（如果全部失败则返回 None）
@@ -838,38 +1025,86 @@ def _multi_start_with_R1_constraint(freq, prodata, circuit, init_params,
     R1_starts[0] = R1_est
 
     # Step 4: 跑 n_starts 次拟合
-    best_result = None
-    best_chisqr = float('inf')
-    print(f"  [多起点模式] method={method}, n_starts={n_starts}, "
-          f"R1_est={R1_est:.3e}, R1_bounds=[{R1_min:.3e}, {R1_max:.3e}]")
+    #
+    # A2 优化（可选并行）：仅当调用方显式传入 de_seed 时，每个起点在
+    # 求解前用 _start_seed(rng_seed, de_seed, i) 确定性播种 —— 每个起点
+    # 的 DE 求解只依赖自己的种子，与执行顺序无关，因此并行执行与串行
+    # 执行结果逐位一致。不传 de_seed 时保持原有行为：DE 消费全局 RNG
+    # 流、串行执行（验证脚本 A1 协议依赖此行为，勿改）。
+    parallel = de_seed is not None and n_jobs > 1
 
-    for i, R1_start in enumerate(R1_starts):
-        pm = Parameters()
+    def _start_spec(i):
+        """构造第 i 个起点的参数规格 [(name, value, min, max), ...]"""
+        R1_start = R1_starts[i]
+        spec = []
         for key, value in init_params.items():
             if key.endswith('_min') or key.endswith('_max'):
                 continue
             if key == R1_name:
-                pm.add(key, value=R1_start, min=R1_min, max=R1_max)
+                spec.append((key, R1_start, R1_min, R1_max))
             else:
                 pmin = init_params.get(f'{key}_min', None)
                 pmax = init_params.get(f'{key}_max', None)
                 pmin, pmax = _compute_adaptive_bounds(
                     value, method, user_min=pmin, user_max=pmax
                 )
-                pm.add(key, value=value, min=pmin, max=pmax)
+                spec.append((key, value, pmin, pmax))
+        return spec
 
-        try:
-            minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
-                               max_nfev=int(1e4))
-            r = minner.minimize(method=method)
-            chisqr = getattr(r, 'chisqr', float('inf'))
-            if np.isfinite(chisqr) and chisqr < best_chisqr:
-                best_chisqr = chisqr
-                best_result = r
-        except Exception as e:
-            # 单个起点失败不影响整体
-            print(f"    [start {i+1}/{n_starts}] 失败: {type(e).__name__}: {str(e)[:50]}")
-            continue
+    print(f"  [多起点模式] method={method}, n_starts={n_starts}, "
+          f"R1_est={R1_est:.3e}, R1_bounds=[{R1_min:.3e}, {R1_max:.3e}]"
+          + (f", parallel n_jobs={n_jobs}" if parallel else ""))
+
+    candidates = []   # [(chisqr, result), ...]，顺序与起点序号一致
+
+    if parallel:
+        pool = _engine_pool(n_jobs)
+        if pool is not None:
+            payloads = [
+                (i, R1_starts[i], _start_spec(i), freq, circuit, ZData,
+                 method, int(1e4), _start_seed(rng_seed, de_seed, i))
+                for i in range(n_starts)
+            ]
+            try:
+                for i, chisqr, r in pool.map(_multistart_worker, payloads):
+                    if r is not None and np.isfinite(chisqr):
+                        candidates.append((chisqr, r))
+            except Exception as e:
+                print(f"    [并行多起点失败: {type(e).__name__}: {str(e)[:60]}]，"
+                      f"回退串行")
+                candidates = []
+        else:
+            print("    [并行进程池不可用，回退串行]")
+
+    if not candidates:
+        # 串行路径：de_seed=None 时为原有行为（全局 RNG 流），
+        # de_seed 非空时逐起点确定性播种（与并行结果逐位一致）
+        for i, R1_start in enumerate(R1_starts):
+            pm = Parameters()
+            for name, val, pmin, pmax in _start_spec(i):
+                pm.add(name, value=val, min=pmin, max=pmax)
+
+            if de_seed is not None:
+                np.random.seed(_start_seed(rng_seed, de_seed, i))
+
+            try:
+                minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                                   max_nfev=int(1e4))
+                r = minner.minimize(method=method)
+                chisqr = getattr(r, 'chisqr', float('inf'))
+                if np.isfinite(chisqr):
+                    candidates.append((chisqr, r))
+            except Exception as e:
+                # 单个起点失败不影响整体
+                print(f"    [start {i+1}/{n_starts}] 失败: {type(e).__name__}: {str(e)[:50]}")
+                continue
+
+    best_result = None
+    best_chisqr = float('inf')
+    for chisqr, r in candidates:
+        if chisqr < best_chisqr:
+            best_chisqr = chisqr
+            best_result = r
 
     if best_result is not None:
         print(f"  [多起点模式] 完成: best χ²={best_chisqr:.4e}")
@@ -900,6 +1135,19 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             'ident_info': 参数可辨识性信息（仅extreme模式）
         }
     """
+    # A2 优化: 引擎级控制参数（可选），从 fit_kwargs 中取出，
+    # 绝不能透传给 scipy（scipy 不认识这些关键字）。
+    #   n_jobs  : 多起点并行进程数（None = 按机器核数自适应，1 = 串行）
+    #   de_seed : 确定性种子。传入时先播种全局 RNG（使单点全局方法
+    #             也与多起点模式一样可复现），多起点模式下再逐起点
+    #             确定性播种 —— 结果只依赖 de_seed，与并行进程数/
+    #             机器核数无关（生产路径固定传入）。
+    n_jobs_raw = fit_kwargs.pop('n_jobs', None)
+    de_seed = fit_kwargs.pop('de_seed', None)
+    if de_seed is not None:
+        np.random.seed(int(de_seed))
+    n_jobs = _auto_n_jobs(n_jobs_raw, n_tasks=10)
+
     use_extreme, reason = should_use_extreme(freq, init_params)
 
     print(f"\n[_auto_fitting_core] 智能判断: {'使用极端条件拟合' if use_extreme else '使用标准拟合'} ({reason})")
@@ -1032,7 +1280,8 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
             if _should_use_multi_start(init_params, method, freq):
                 multi_result = _multi_start_with_R1_constraint(
                     freq, prodata, circuit, init_params, method,
-                    n_starts=10, r1_tighten=10.0, rng_seed=42
+                    n_starts=10, r1_tighten=10.0, rng_seed=42,
+                    de_seed=de_seed, n_jobs=n_jobs
                 )
                 if multi_result is not None:
                     return {
@@ -1103,7 +1352,8 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
                     de_result = _multi_start_with_R1_constraint(
                         freq, prodata, circuit, init_params,
                         'differential_evolution',
-                        n_starts=10, r1_tighten=10.0, rng_seed=42)
+                        n_starts=10, r1_tighten=10.0, rng_seed=42,
+                        de_seed=de_seed, n_jobs=n_jobs)
                 else:
                     de_result = None
                 if de_result is None:

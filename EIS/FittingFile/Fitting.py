@@ -24,7 +24,10 @@ from lmfit import Parameters, Parameter
 from EIS.ModelFile.ECUI import Tab1Content
 from EIS.ModelFile.MTMUI import Tab2Content
 
-from EIS.FittingFile.FittingECM import FittingECM, FittingresultsprocessECM, auto_fitting
+from EIS.FittingFile.FittingECM import (
+    FittingECM, FittingresultsprocessECM, auto_fitting,
+    parallel_fit_datasets, _should_use_multi_start,
+)
 from EIS.FittingFile.FittingMT import FittingMT, Fittingresultsprocess
 from EIS.ModelFile.ECMFunctions import ECMFunction
 from EIS.ModelFile.MTMFunctions import MTMFunction
@@ -408,6 +411,30 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
             except Exception as e:
                 print(f'[ECMcalculation] 读取设置失败，使用默认设置: {e}')
 
+        # ---- 并行拟合调度（不牺牲拟合精度）----
+        # 电路会触发引擎多起点（全局方法 + 多解性/量级差）时，交给引擎
+        # 内层起点级并行；否则多数据集批量拟合改用数据集级并行。两者
+        # 互斥，避免进程池嵌套超订。de_seed 固定 ⇒ 拟合结果与并行进程
+        # 数/机器核数无关，任意机器上逐位一致；进程数由引擎按机器
+        # 实际核数自适应（ANYEIS_FIT_WORKERS/ANYEIS_FIT_PARALLEL 可覆盖）。
+        init_params_probe = {name: p.value for name, p in self.ECMparams.items()}
+        use_inner = (
+            fit_method in ('differential_evolution', 'dual_annealing', 'ampgo')
+            and _should_use_multi_start(init_params_probe, fit_method)
+        )
+        engine_results = None
+        if not use_inner and n > 1:
+            batch_tasks = [
+                (self.ECMparams.copy(), fit_data[i]['FREQ[Hz]'], self.circuit,
+                 fit_data[i], fit_method,
+                 {**fit_kwargs, 'de_seed': 42, 'n_jobs': 1})
+                for i in range(n)
+            ]
+            print(f"[ECMcalculation] 批量并行拟合 {n} 个数据集（数据集级并行）")
+            engine_results = parallel_fit_datasets(batch_tasks)
+            if engine_results is None:
+                print("[ECMcalculation] 数据集级并行不可用，回退逐个串行拟合")
+
         for i in range(0, n):  # 第i组拟合数据
             print(f"\n[ECMcalculation] 处理数据集{i}")
             ###############生成频率序列###############
@@ -428,7 +455,15 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
                 # 误差逐组恶化)。self.ECMparams 保持表格初值不变。
                 fit_params = self.ECMparams.copy()
 
-                results = auto_fitting(fit_params, ECMfreq, self.circuit, fit_data[i], method=fit_method, **fit_kwargs)  #########智能拟合
+                if engine_results is not None:
+                    # 批量并行已算好（顺序与本循环一致）
+                    results = engine_results[i]
+                else:
+                    # 逐数据集拟合：de_seed 固定 + 引擎内层自适应并行
+                    results = auto_fitting(fit_params, ECMfreq, self.circuit,
+                                           fit_data[i], method=fit_method,
+                                           de_seed=42, n_jobs=None,
+                                           **fit_kwargs)  #########智能拟合
                 self.fittedresults.append(results)  ######拟合后结果列表
 
                 # ampgo 等方法 MinimizerResult.message 不可用，需 getattr 兜底

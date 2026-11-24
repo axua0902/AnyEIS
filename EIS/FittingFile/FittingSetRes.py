@@ -9,6 +9,7 @@ import os, sys
 import pandas as pd
 import numpy as np
 
+from datetime import datetime
 from random import randint
 from PySide6.QtCore import *
 from PySide6.QtGui import *
@@ -95,7 +96,9 @@ def detect_data_mode(frame):
 # from lmfit import  fit_report, minimize
 
 
-from EIS.FittingFile.FittingSetResUI import settingUI, resultsUI
+from EIS.FittingFile.FittingSetResUI import (
+    settingUI, resultsUI, compute_fit_metrics,
+)
 
 
 class settingWidget(QWidget):  ##############输入仿真参数
@@ -151,6 +154,9 @@ class resultWidget(QWidget):  ############输出仿真结果
 
         # 连接数据集选择器信号
         self.resultsui.datasetSelector.currentIndexChanged.connect(self.on_dataset_selector_changed)
+
+        # Save to Excel: 导出拟合指标/参数/数据曲线(见 save_results_to_excel)
+        self.resultsui.savereultsbtn.clicked.connect(self.save_results_to_excel)
 
         # Fitting 控件引用(仅用于读取 lmfit 拟合结果, 不改变信号的数据传递方式)
         self.fitting_widget = None
@@ -419,6 +425,146 @@ class resultWidget(QWidget):  ############输出仿真结果
             Z_fitted = frame_to_impedance(prodata[fitted_index])
 
         self.update_overall_results_table(fit_results[index], Z_data, Z_fitted, index, mode=mode)
+
+    # ------------------------------------------------------------------
+    # Save to Excel: 导出拟合结果
+    # ------------------------------------------------------------------
+    def save_results_to_excel(self):
+        """
+        "Save to Excel" 按钮槽: 把当前拟合结果直接导出到 Results 文件夹
+
+        不弹对话框, 文件名自动用时间戳; 内容(每个数据集一条记录):
+        - Metrics:     10 列拟合质量指标(与结果表同口径, 复用 compute_fit_metrics)
+        - Parameters:  各数据集每个参数的 拟合值/标准误差/初值/上下边界
+        - Data N:      各数据集的原始数据与拟合数据并排(列名加前缀区分)
+        """
+        if not self.fit_results:
+            QMessageBox.warning(
+                self, 'Warning',
+                'No fitting results to save.\nPlease run a fit first.')
+            return
+
+        # 直接保存到项目根目录 Results/, 文件名与 Figure 页导出惯例一致(时间戳)
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        results_dir = os.path.join(project_root, 'Results')
+        try:
+            os.makedirs(results_dir, exist_ok=True)
+        except Exception as e:
+            QMessageBox.critical(
+                self, 'Error',
+                f'Failed to create results directory:\n{results_dir}\n{str(e)}')
+            return
+        timestamp = datetime.now().strftime('%y%m%d%H%M%S')
+        file_path = os.path.join(results_dir, f'fitting_results_{timestamp}.xlsx')
+
+        try:
+            with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                self._build_metrics_frame().to_excel(
+                    writer, sheet_name='Metrics', index=False)
+                self._build_params_frame().to_excel(
+                    writer, sheet_name='Parameters', index=False)
+                for sheet_name, frame in self._build_data_frames():
+                    frame.to_excel(writer, sheet_name=sheet_name, index=False)
+            QMessageBox.information(
+                self, 'Success',
+                f'Fitting results saved to:\n{file_path}')
+        except Exception as e:
+            print(f'[save_results_to_excel] 保存失败: {e}')
+            QMessageBox.critical(
+                self, 'Error',
+                f'Failed to save fitting results:\n{str(e)}')
+
+    def _dataset_frames(self, index):
+        """按数据集索引取 (原始数据帧, 拟合数据帧); prodata 为 2N 交错排列"""
+        orig = fitted = None
+        if prodata and len(prodata) > index * 2 + 1:
+            orig = prodata[index * 2]
+            fitted = prodata[index * 2 + 1]
+        return orig, fitted
+
+    def _dataset_label(self, index):
+        """数据集显示名: 优先用 prodataname 偶数位(原始数据名), 否则 Dataset N"""
+        try:
+            if prodataname and len(prodataname) > index * 2:
+                name = str(prodataname[index * 2])
+                if name:
+                    return name
+        except Exception:
+            pass
+        return f'Dataset {index + 1}'
+
+    def _build_metrics_frame(self):
+        """每个数据集一行的拟合质量指标表(与结果表同口径)"""
+        rows = []
+        for i, result in enumerate(self.fit_results):
+            orig, fitted = self._dataset_frames(i)
+            metrics, _mode = compute_fit_metrics(
+                result, frame_to_impedance(orig), frame_to_impedance(fitted),
+                i, mode=detect_data_mode(orig))
+            row = {name: value for name, value in metrics}
+            row['Dataset'] = self._dataset_label(i)
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def _build_params_frame(self):
+        """各数据集每个参数的 拟合值/标准误差/初值/上下边界 表"""
+        rows = []
+        for i, result in enumerate(self.fit_results):
+            if not hasattr(result, 'params'):
+                continue
+            label = self._dataset_label(i)
+            for name, param in result.params.items():
+                rows.append({
+                    'Dataset': label,
+                    'Parameter': name,
+                    'Value': float(param.value),
+                    'Stderr': float(param.stderr) if param.stderr is not None else None,
+                    'Init Value': float(param.init_value),
+                    'Min': None if param.min == -np.inf else float(param.min),
+                    'Max': None if param.max == np.inf else float(param.max),
+                    'Vary': bool(param.vary),
+                })
+        return pd.DataFrame(rows)
+
+    def _build_data_frames(self):
+        """
+        每个数据集生成 (sheet 名, 原始+拟合并排的 DataFrame)
+
+        列名加 Orig_/Fit_ 前缀区分; 两帧中数值完全相同的列(如同一频率轴)
+        只在 Orig 侧保留一份 —— 不能按列名判断, 拟合帧与原始帧列名结构相同
+        但 Rs/X 等数据列数值不同, 必须逐列比较数值。
+        """
+        frames = []
+        for i in range(len(self.fit_results)):
+            orig, fitted = self._dataset_frames(i)
+            if orig is None or not hasattr(orig, 'add_prefix'):
+                continue
+            orig_part = orig.add_prefix('Orig_')
+            parts = [orig_part]
+            if fitted is not None and hasattr(fitted, 'add_prefix'):
+                fit_part = fitted.add_prefix('Fit_')
+                duplicated = []
+                for c in fit_part.columns:
+                    base = c[len('Fit_'):]
+                    if base not in orig.columns:
+                        continue
+                    a = orig[base].to_numpy()
+                    b = fitted[base].to_numpy()
+                    if a.shape == b.shape and np.array_equal(a, b):
+                        duplicated.append(c)
+                if duplicated:
+                    fit_part = fit_part.drop(columns=duplicated)
+                parts.append(fit_part)
+            frames.append((self._sanitize_sheet_name(f'Data {i + 1}'),
+                           pd.concat(parts, axis=1)))
+        return frames
+
+    @staticmethod
+    def _sanitize_sheet_name(name):
+        """Excel sheet 名限制: <=31 字符, 不含 []:*?/\\ 等非法字符"""
+        for ch in '[]:*?\\':
+            name = name.replace(ch, '_')
+        return name[:31] or 'Sheet'
 
 
 class bottomLWidget(QWidget):

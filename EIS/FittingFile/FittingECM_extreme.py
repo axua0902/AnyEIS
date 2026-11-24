@@ -25,13 +25,59 @@
 import sys
 sys.path.append('..')
 
+import os
+
+# 直接运行本模块时（python FittingECM_extreme.py）sys.path[0] 是本文件
+# 所在目录，找不到 EIS 包；此处按文件位置把项目根目录加入 sys.path。
+# 被正常导入时（EIS.FittingFile.FittingECM_extreme）根目录已在路径中，
+# 此操作无副作用。
+_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 import numpy as np
 from numpy import pi, real, imag
 from pandas import DataFrame, Series
 
 from lmfit import Minimizer, Parameters
 
-from EIS.FittingFile.FittingECM import fcn2min, _identify_circuit_params
+from EIS.FittingFile.FittingECM import (
+    fcn2min, _identify_circuit_params, _auto_n_jobs, _engine_pool,
+)
+
+
+def _extreme_start_worker(payload):
+    """多起点并行 worker：完成单个起点的 least_squares 拟合
+
+    payload: (order, spec, freq, circuit, ZData, loss, max_nfev)
+        spec: [(name, value, min, max, vary), ...]（vary=False 时固定参数）
+    返回: (order, error, lmfit Result 或 None)
+
+    least_squares 求解不消耗随机数，起点初值由调用方预先按原串行
+    顺序生成，因此并行结果与串行逐位一致。
+    """
+    order, spec, freq, circuit, ZData, loss, max_nfev = payload
+    # worker 无 QApplication，弹窗会使进程终止，改为静默打印
+    try:
+        from EIS.FittingFile.FittingWarnings import set_silent_mode
+        set_silent_mode(True)
+    except Exception:
+        pass
+    pm = Parameters()
+    for name, val, pmin, pmax, vary in spec:
+        if vary:
+            pm.add(name, value=val, min=pmin, max=pmax)
+        else:
+            pm.add(name, value=val, vary=False)
+    try:
+        minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                           loss=loss, max_nfev=max_nfev)
+        r = minner.minimize(method='least_squares')
+        err = float(np.sum(fcn2min(r.params, freq, circuit, ZData)))
+        return order, err, r
+    except Exception:
+        return order, float('inf'), None
 
 
 
@@ -310,31 +356,70 @@ def multi_start_fit(freq, prodata, circuit, n_starts=20, loss='soft_l1', R1_est=
     best_result = baseline
     best_error = baseline_error
 
-    # 生成多个起点
+    # ---- 生成多个起点 ----
+    # 先按原串行顺序预生成全部起点初值（least_squares 求解本身不消耗
+    # 随机数，预生成不改变任何数值），再按顺序并行/串行执行各起点拟合。
     np.random.seed(42)
+    starts = []
     for _ in range(n_starts - 1):
         # 对数空间均匀采样初始值
         series_R_init = 10 ** np.random.uniform(np.log10(series_R_low), np.log10(series_R_high))
         C_init = 10 ** np.random.uniform(-12, 2)  # 1e-12 ~ 100
         parallel_R_init = 10 ** np.random.uniform(0, 9)    # 1 ~ 1e9
+        starts.append((series_R_init, C_init, parallel_R_init))
 
-        pm = Parameters()
-        pm.add(series_R_name, value=series_R_init, min=series_R_low, max=series_R_high)
-        pm.add(C_name, value=C_init, min=1e-12, max=1e4)
-        pm.add(parallel_R_name, value=parallel_R_init, min=1e-3, max=1e12)
+    def _start_spec(s):
+        series_R_init, C_init, parallel_R_init = s
+        return [
+            (series_R_name, series_R_init, series_R_low, series_R_high, True),
+            (C_name, C_init, 1e-12, 1e4, True),
+            (parallel_R_name, parallel_R_init, 1e-3, 1e12, True),
+        ]
 
-        minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
-                           loss=loss, max_nfev=1e5)
-        try:
-            result = minner.minimize(method='least_squares')
-            error = np.sum(fcn2min(result.params, freq, circuit, ZData))
-            all_results.append(result)
+    # 并行执行（自适应核数；进程池不可用时自动回退串行）。
+    # 单个起点失败仅跳过该起点，与原串行 except: continue 语义一致。
+    n_jobs = _auto_n_jobs(None, n_tasks=max(1, len(starts)))
+    per_start = None
+    if n_jobs > 1 and len(starts) > 1:
+        pool = _engine_pool(n_jobs)
+        if pool is not None:
+            payloads = [(i, _start_spec(s), freq, circuit, ZData,
+                         loss, int(1e5))
+                        for i, s in enumerate(starts)]
+            try:
+                per_start = {}
+                for order, err, r in pool.map(_extreme_start_worker, payloads):
+                    per_start[order] = (err, r)
+            except Exception as e:
+                print(f"    [并行多起点失败: {type(e).__name__}: {str(e)[:60]}]，回退串行")
+                per_start = None
 
-            if error < best_error:
-                best_error = error
-                best_result = result
-        except:
-            continue
+    for i, s in enumerate(starts):
+        if per_start is not None and i in per_start:
+            error, result = per_start[i]
+            if result is None:
+                continue
+        else:
+            # 串行路径（与原实现逐位一致）
+            series_R_init, C_init, parallel_R_init = s
+            pm = Parameters()
+            pm.add(series_R_name, value=series_R_init, min=series_R_low, max=series_R_high)
+            pm.add(C_name, value=C_init, min=1e-12, max=1e4)
+            pm.add(parallel_R_name, value=parallel_R_init, min=1e-3, max=1e12)
+
+            minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                               loss=loss, max_nfev=1e5)
+            try:
+                result = minner.minimize(method='least_squares')
+                error = np.sum(fcn2min(result.params, freq, circuit, ZData))
+            except:
+                continue
+
+        all_results.append(result)
+
+        if error < best_error:
+            best_error = error
+            best_result = result
 
     return best_result, all_results
 
@@ -427,30 +512,68 @@ def constrained_fit(freq, prodata, circuit, R1_true=None, C3_true=None, R6_true=
 
     # 如果是电容不可见，尝试多起点搜索优化电阻分配
     if status == 'C_invisible':
+        # 先按原串行顺序预生成全部起点初值（least_squares 求解不消耗
+        # 随机数，预生成不改变任何数值），再按顺序并行/串行执行。
+        R_sum = np.mean(real(ZData))  # 总电阻估计（常量，提出循环外）
         np.random.seed(42)
+        starts = []
         for _ in range(n_starts):
-            R_sum = np.mean(real(ZData))  # 总电阻估计
             series_R_init = np.random.uniform(1e-2, R_sum)
             parallel_R_init = R_sum - series_R_init
+            starts.append((series_R_init, parallel_R_init))
+
+        def _start_spec(s):
+            series_R_init, parallel_R_init = s
+            return [
+                (series_R_name, series_R_init, series_R_low, series_R_high, True),
+                (C_name, C3_true if C3_true else 1e-12, None, None, False),
+                (parallel_R_name, parallel_R_init, 1e-3, R_sum, True),
+            ]
+
+        # 并行执行（自适应核数；进程池不可用时自动回退串行）
+        n_jobs = _auto_n_jobs(None, n_tasks=max(1, len(starts)))
+        per_start = None
+        if n_jobs > 1 and len(starts) > 1:
+            pool = _engine_pool(n_jobs)
+            if pool is not None:
+                payloads = [(i, _start_spec(s), freq, circuit, ZData,
+                             'soft_l1', int(1e5))
+                            for i, s in enumerate(starts)]
+                try:
+                    per_start = {}
+                    for order, err, r in pool.map(_extreme_start_worker, payloads):
+                        per_start[order] = (err, r)
+                except Exception as e:
+                    print(f"    [并行多起点失败: {type(e).__name__}: {str(e)[:60]}]，回退串行")
+                    per_start = None
+
+        for i, s in enumerate(starts):
+            series_R_init, parallel_R_init = s
             if parallel_R_init <= 0:
                 continue
 
-            pm = Parameters()
-            pm.add(series_R_name, value=series_R_init, min=series_R_low, max=series_R_high)
-            pm.add(C_name, value=C3_true if C3_true else 1e-12, vary=False)
-            pm.add(parallel_R_name, value=parallel_R_init, min=1e-3, max=R_sum)
+            if per_start is not None and i in per_start:
+                error, result = per_start[i]
+                if result is None:
+                    continue
+            else:
+                # 串行路径（与原实现逐位一致）
+                pm = Parameters()
+                pm.add(series_R_name, value=series_R_init, min=series_R_low, max=series_R_high)
+                pm.add(C_name, value=C3_true if C3_true else 1e-12, vary=False)
+                pm.add(parallel_R_name, value=parallel_R_init, min=1e-3, max=R_sum)
 
-            minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
-                               loss='soft_l1', max_nfev=1e5)
-            try:
-                result = minner.minimize(method='least_squares')
-                error = np.sum(fcn2min(result.params, freq, circuit, ZData))
+                minner = Minimizer(fcn2min, pm, fcn_args=(freq, circuit, ZData),
+                                   loss='soft_l1', max_nfev=1e5)
+                try:
+                    result = minner.minimize(method='least_squares')
+                    error = np.sum(fcn2min(result.params, freq, circuit, ZData))
+                except:
+                    continue
 
-                if error < best_error:
-                    best_error = error
-                    best_result = result
-            except:
-                continue
+            if error < best_error:
+                best_error = error
+                best_result = result
 
     return best_result
 

@@ -6,6 +6,7 @@
 import sys
 import os
 import ctypes
+import multiprocessing
 
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow
@@ -93,6 +94,10 @@ class MainWindow(QMainWindow):
 
 # Set the initial class and also additional parameters of the "QApplication" class
 if __name__ == "__main__":
+
+    # PyInstaller 冻结环境下 multiprocessing 子进程 spawn 需要
+    # freeze_support，否则并行拟合的 worker 子进程会重复启动主程序
+    multiprocessing.freeze_support()
 
     app = QApplication(sys.argv) # APPLICATION
     app.setWindowIcon(QIcon("logo.png"))
