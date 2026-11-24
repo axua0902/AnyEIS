@@ -185,6 +185,8 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.tab2.openexfilebtn.clicked.connect(self.saveMTModel)
         self.tab2.saveasBtn.clicked.connect(self.saveasMTModel)
         self.tab2.clearModelBtn.clicked.connect(self.clearMTModel)
+        # 数据集下拉框: 切换 MTtable 显示的拟合结果所在数据集
+        self.tab2.datasetComboBox.currentIndexChanged.connect(self.on_mt_dataset_changed)
 
         self.params = Parameters()
         self.circuit = list()
@@ -199,6 +201,10 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
 
         self.fitteddata = list()  ######拟合后数据列表
         self.fittedresults = list()  ######拟合后结果列表
+
+        # 当前显示的数据集索引(ECM / MT 各自独立)
+        self.current_fitting_dataset = 0
+        self.current_fitting_dataset_mt = 0
 
         # 配对数据支持(与 Filter/Processing 一致的协议)
         self.dataInfo = []                  # 输入数据信息(从上游接收)
@@ -535,6 +541,9 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.fittedresults = list()
         self.resultsdataInfo = []
 
+        # 清空数据集下拉框
+        self.update_mt_dataset_selector(0)
+
         # 清空全局 plot 副本
         try:
             global plotdata, plotdataname, outputlist
@@ -579,6 +588,7 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         self.fitteddata = list()  ######拟合后数据列表
         self.fittedresults = list()  ######拟合后结果列表
         self.resultsdataInfo = []   # 输出 dataInfo(2N)
+        self.current_fitting_dataset_mt = 0   # 新的拟合从第 1 组数据开始显示
 
         ############## 读取表格数据 生成参数################
         currentRow = self.tab2.MTtable.rowCount()  # 获取当前的行数
@@ -615,13 +625,19 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
             ################拟合计算###############
             if len(MTfreq) != 0 and len(self.MTparams) != 0 and len(self.modelterm) != 0:
                 # print(fit_data)
-                results = FittingMT(self.MTparams, MTfreq, self.modelterm, fit_data[i], self.option, method=fit_method, **fit_kwargs)
+                # 与 ECMcalculation 的 P5 修复保持一致: 每个数据集使用独立参数副本。
+                # Fittingresultsprocess 会把拟合值原地写回传入的 Parameters;
+                # 若多组数据共享 self.MTparams, 上一组的拟合值会串味成下一组的
+                # 初值(实测 MT 批量拟合第 3 组 nfev 由 1659 变为 88700)。
+                fit_params = self.MTparams.copy()
+
+                results = FittingMT(fit_params, MTfreq, self.modelterm, fit_data[i], self.option, method=fit_method, **fit_kwargs)
                 self.fittedresults.append(results)  ######拟合后结果列表
                 # print(results)
                 # ampgo 等方法 MinimizerResult.message 不可用，getattr 兜底
                 mt_msg = getattr(results, 'message', None) or getattr(results, 'ampgo_msg', None)
                 print(f"[MTcalculation]   拟合结果message: {mt_msg}")
-                fitteddata = Fittingresultsprocess(self.MTparams, MTfreq, self.modelterm, results, self.option)
+                fitteddata = Fittingresultsprocess(fit_params, MTfreq, self.modelterm, results, self.option)
                 self.fitteddata.append(fitteddata)  ######拟合后数据列表
                 # 命名:原名保持原样,拟合结果追加 _Fitted
                 orig_name = fit_names[i] if i < len(fit_names) else f'data_{i}'
@@ -657,6 +673,8 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         print(outputlist)
         ########################拟合计算###############
         self.processMTResults()
+        # 按拟合数据集数量重建数据集下拉框(多组数据时可切换 MTtable 显示内容)
+        self.update_mt_dataset_selector()
         # 第 4 参数改为 dataInfo 以便下游 Figure 识别 synthetic 标签
         self.sendsignal(outputlist, plotdataname, outputdata, self.resultsdataInfo)
 
@@ -787,6 +805,44 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
         print(f"[on_ecm_dataset_changed] 切换到数据集: {index}")
         self.processECMResults(index)
 
+    def update_mt_dataset_selector(self, count=None):
+        """
+        按拟合数据集数量重建 MT 页的数据集下拉框
+
+        参数:
+            count: 数据集数量, None表示取自 self.fittedresults
+        """
+        if count is None:
+            count = len(self.fittedresults) if self.fittedresults else 0
+
+        combo = self.tab2.datasetComboBox
+        combo.blockSignals(True)
+        combo.clear()
+        for i in range(count):
+            combo.addItem(f"Dataset {i + 1}")
+        if count > 0:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+        # 单个数据集时无需切换, 隐藏下拉框
+        visible = count > 1
+        combo.setVisible(visible)
+        print(f"[update_mt_dataset_selector] 数据集数量: {count}, 下拉框可见: {visible}")
+
+    def on_mt_dataset_changed(self, index):
+        """
+        切换 MT 结果表格显示的数据集
+
+        参数:
+            index: 数据集索引
+        """
+        if index < 0:
+            return
+        if not self.fittedresults or index >= len(self.fittedresults):
+            return
+        print(f"[on_mt_dataset_changed] 切换到数据集: {index}")
+        self.processMTResults(index)
+
     def processMTResults(self, dataset_index=None):
         """
         处理MT拟合结果并写入MTtable
@@ -799,14 +855,14 @@ class Fitting(ECMFunction, MTMFunction, PyTabWidget2):
 
         # 如果没有指定索引，设置当前索引
         if dataset_index is None:
-            dataset_index = getattr(self, 'current_fitting_dataset', 0)
+            dataset_index = getattr(self, 'current_fitting_dataset_mt', 0)
         else:
-            self.current_fitting_dataset = dataset_index
+            self.current_fitting_dataset_mt = dataset_index
 
         # 确保索引在有效范围内
         if dataset_index >= len(self.fittedresults):
             dataset_index = 0
-            self.current_fitting_dataset = 0
+            self.current_fitting_dataset_mt = 0
 
         fit_result = self.fittedresults[dataset_index]
 

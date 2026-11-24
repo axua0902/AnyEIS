@@ -33,6 +33,19 @@ global globalchosedfileslist
 from setting import Settings  # 应用设置
 from themes import Themes     # 主题颜色
 
+
+# 拟合结果表列布局(10 列 = 3 列工作量 + 7 列拟合质量):
+# ECM 与 MT 的共用量固定在同一列位(1-4、7-10),
+# 仅第 5/6 列按模式分化 —— ECM: R²/RMSE; MT: ε'/σ' 分通道 RMS。
+# 删除的旧列: χ²(EIS 口径, Ω 量纲与 Chi² 同名异义)、Chi²(与 RMS rel err 信息冗余);
+# 新增: Max rel err(暴露 RMS 平均掉的局部失配)、NParam(解读 BIC 惩罚项与过拟合)。
+ECM_RESULT_HEADERS = ['Dataset', 'NFev', 'NData', 'RMS rel err (%)',
+                      'R²', 'RMSE (Ω)', 'Max rel err (%)',
+                      'Reduced χ²', 'BIC', 'NParam']
+MT_RESULT_HEADERS = ['Dataset', 'NFev', 'NData', 'RMS rel err (%)',
+                     "RMS(ε') (%)", "RMS(σ') (%)", 'Max rel err (%)',
+                     'Reduced χ²', 'BIC', 'NParam']
+
 class settingUI():
     def setupUI(self, widget):
         settings = Settings()        # LOAD SETTINGS
@@ -290,10 +303,10 @@ class resultsUI():
         self.resultsSectionLayout.addWidget(self.resultsTitleRow)
 
         # Results table - 显示整体拟合指标（横向布局）
-        # 初始化时设置默认的横向表头，数据更新时会重新设置
+        # 初始化时设置默认的横向表头（ECM 布局），数据更新时按模式重设
         self.resultstable = QTableWidget()
         self.resultstable.setRowCount(0)
-        default_headers = ['Dataset', 'NFev', 'NData', 'R²', 'RMSE', 'χ²', 'Chi²', 'Reduced χ²', 'BIC']
+        default_headers = ECM_RESULT_HEADERS
         self.resultstable.setColumnCount(len(default_headers))
         self.resultstable.setHorizontalHeaderLabels(default_headers)
         self.resultstable.verticalHeader().setVisible(False)
@@ -406,15 +419,22 @@ class resultsUI():
 #             return
 #         self.setValue(self.value() + 1)
 
-    def updateResultsTable(self, fit_result, Z_data=None, Z_fitted=None, dataset_index=0):
+    def updateResultsTable(self, fit_result, Z_data=None, Z_fitted=None, dataset_index=0, mode=None):
         """
-        更新整体拟合结果表格
+        更新整体拟合结果表格(10 列: 3 列工作量 + 7 列拟合质量)
+
+        ECM 与 MT 的共用量固定在同一列位(1-4、7-10):
+            Dataset / NFev / NData / RMS rel err (%) / Max rel err (%)
+            / Reduced χ² / BIC / NParam
+        第 5/6 列按模式分化: ECM 显示 R²/RMSE; MT 显示 ε'/σ' 分通道 RMS。
 
         参数:
             fit_result: lmfit 拟合结果对象
-            Z_data: 原始阻抗数据 (复数数组)
-            Z_fitted: 拟合阻抗数据 (复数数组)
+            Z_data: 原始数据(复数数组; MT 为等效阻抗)
+            Z_fitted: 拟合数据(复数数组; MT 为等效阻抗)
             dataset_index: 数据集索引
+            mode: 'ECM' / 'MT'; 缺省时按残差长度自动推断
+                  (ECM 残差 N = len(Z); MT 残差 2N = 2·len(Z))
         """
         print("\n" + "="*50)
         print("[updateResultsTable] 开始更新结果表格")
@@ -425,45 +445,80 @@ class resultsUI():
         # 清空表格
         self.resultstable.setRowCount(0)
 
-        # 计算整体拟合指标
+        # lmfit 的 MinimizerResult 没有 .data, 数据点数在 .ndata
+        residual = getattr(fit_result, 'residual', None)
+        n_data = getattr(fit_result, 'ndata', None)
+        if n_data is None and residual is not None:
+            n_data = len(residual)
+        chisqr = getattr(fit_result, 'chisqr', None)
+
+        # 模式判定: 未显式给出时按残差/数据长度关系推断
+        if mode not in ('ECM', 'MT'):
+            if (residual is not None and Z_data is not None
+                    and len(Z_data) > 0 and len(residual) == 2 * len(Z_data)):
+                mode = 'MT'
+            else:
+                mode = 'ECM'
+        print(f"[updateResultsTable] 模式: {mode}")
+
+        # 计算整体拟合指标(顺序 = 列顺序, 与 ECM/MT_RESULT_HEADERS 一致)
         metrics = []
 
-        # 基本信息
+        # --- 列 1-3: 工作量/元信息(两模式同位) ---
         metrics.append(('Dataset', f'#{dataset_index + 1}'))
         metrics.append(('NFev', fit_result.nfev if hasattr(fit_result, 'nfev') else 'N/A'))
-        metrics.append(('NData', len(fit_result.data) if hasattr(fit_result, 'data') and fit_result.data is not None else 'N/A'))
+        metrics.append(('NData', n_data if n_data is not None else 'N/A'))
 
-        # 计算 R² 和 RMSE（如果有原始数据）
-        if Z_data is not None and Z_fitted is not None:
-            Z_data = np.array(Z_data)
-            Z_fitted = np.array(Z_fitted)
+        # --- 列 4: 主判据(两模式同位) ---
+        # 残差定义为相对误差, 因此 sqrt(chisqr/ndata) 即 RMS 相对误差
+        if chisqr is not None and n_data:
+            metrics.append(('RMS rel err (%)', f'{100.0 * np.sqrt(chisqr / n_data):.4f}'))
+        else:
+            metrics.append(('RMS rel err (%)', 'N/A'))
 
-            # 计算残差
-            residuals = Z_data - Z_fitted
+        # --- 列 5-6: 模式特化 ---
+        if mode == 'MT':
+            # MT 残差为 2N 维: 前 N 个 ε' 通道, 后 N 个 σ' 通道
+            if residual is not None and n_data and n_data >= 2:
+                n_half = n_data // 2
+                res = np.asarray(residual, dtype=float)
+                metrics.append(("RMS(ε') (%)", f'{100.0 * np.sqrt(np.mean(res[:n_half] ** 2)):.4f}'))
+                metrics.append(("RMS(σ') (%)", f'{100.0 * np.sqrt(np.mean(res[n_half:] ** 2)):.4f}'))
+            else:
+                metrics.append(("RMS(ε') (%)", 'N/A'))
+                metrics.append(("RMS(σ') (%)", 'N/A'))
+        else:
+            # ECM: R² 与 RMSE 按原始 Z 口径(仅 sanity 用)
+            if Z_data is not None and Z_fitted is not None:
+                Z_data = np.array(Z_data)
+                Z_fitted = np.array(Z_fitted)
+                residuals = Z_data - Z_fitted
+                ss_res = np.sum(np.abs(residuals) ** 2)
+                ss_tot = np.sum(np.abs(Z_data - np.mean(Z_data)) ** 2)
+                r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+                rmse = np.sqrt(np.mean(np.abs(residuals) ** 2))
+                metrics.append(('R²', f'{r_squared:.6f}'))
+                metrics.append(('RMSE (Ω)', f'{rmse:.6e}'))
+            else:
+                metrics.append(('R²', 'N/A'))
+                metrics.append(('RMSE (Ω)', 'N/A'))
 
-            # 计算 R²
-            ss_res = np.sum(np.abs(residuals) ** 2)
-            ss_tot = np.sum(np.abs(Z_data - np.mean(Z_data)) ** 2)
-            r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-            metrics.append(('R²', f'{r_squared:.6f}'))
+        # --- 列 7: 最差单点(两模式同位, 残差即相对误差, 直接取最大值) ---
+        if residual is not None and np.size(residual) > 0:
+            metrics.append(('Max rel err (%)', f'{100.0 * float(np.max(np.abs(residual))):.4f}'))
+        else:
+            metrics.append(('Max rel err (%)', 'N/A'))
 
-            # 计算 RMSE
-            rmse = np.sqrt(np.mean(np.abs(residuals) ** 2))
-            metrics.append(('RMSE', f'{rmse:.6f}'))
+        # --- 列 8-10: dof 重标定 / 模型选择 / 参数数(两模式同位) ---
+        # lmfit 的 Reduced χ² 属性名为 redchi(无 red_chisqr)
+        redchi = getattr(fit_result, 'redchi', None)
+        metrics.append(('Reduced χ²', f'{redchi:.6e}' if redchi is not None else 'N/A'))
+        metrics.append(('BIC', f'{fit_result.bic:.4f}' if hasattr(fit_result, 'bic') else 'N/A'))
+        var_names = getattr(fit_result, 'var_names', None)
+        metrics.append(('NParam', len(var_names) if var_names else 'N/A'))
 
-            # 计算卡方
-            chi_sq = np.sum(np.abs(residuals) ** 2 / np.abs(Z_data))
-            metrics.append(('χ²', f'{chi_sq:.6f}'))
-
-        # 归一化误差
-        if hasattr(fit_result, 'chisqr'):
-            metrics.append(('Chi²', f'{fit_result.chisqr:.6e}'))
-        if hasattr(fit_result, 'red_chisqr'):
-            metrics.append(('Reduced χ²', f'{fit_result.red_chisqr:.6e}'))
-
-        # BIC（如果可用）
-        if hasattr(fit_result, 'bic'):
-            metrics.append(('BIC', f'{fit_result.bic:.4f}'))
+        headers = MT_RESULT_HEADERS if mode == 'MT' else ECM_RESULT_HEADERS
+        assert len(headers) == len(metrics), f'表头({len(headers)})与指标({len(metrics)})列数不一致'
 
         print(f"[updateResultsTable] metrics数量: {len(metrics)}")
         for name, value in metrics:
@@ -474,8 +529,8 @@ class resultsUI():
         self.resultstable.setRowCount(1)
         self.resultstable.setColumnCount(len(metrics))
         
-        # 第一行：表头（参数名）
-        self.resultstable.setHorizontalHeaderLabels([name for name, _ in metrics])
+        # 第一行：表头（与 ECM/MT_RESULT_HEADERS 一致）
+        self.resultstable.setHorizontalHeaderLabels(headers)
         
         # 第二行：数值（第一行的单元格）
         for i, (name, value) in enumerate(metrics):

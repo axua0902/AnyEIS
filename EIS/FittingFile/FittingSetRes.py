@@ -27,6 +27,64 @@ global globalchosedfileslist
 prodata = list()
 fittedresults = list()
 
+# 真空介电常数(F/m), 用于把 MT 数据(ε', σ)换算成等效阻抗
+EPS0 = 8.8541878128e-12
+
+
+def mt_frame_to_zeq(frame):
+    """
+    把 MT 数据帧(ε', σ)转换为等效阻抗 Z = 1/(σ + j·ω·ε0·ε')
+
+    介电谱数据本身不是阻抗, 直接用 ε' + jσ' 计算误差指标没有物理意义,
+    这里统一换算到等效阻抗口径, 使 R²/RMSE/χ² 与 ECM 路径可比。
+    """
+    if frame is None or not hasattr(frame, 'columns'):
+        return None
+    columns = set(frame.columns)
+    if not {'FREQ[Hz]', 'epsRE[-]', 'sigmaRE[S/m]'}.issubset(columns):
+        return None
+
+    freq = frame['FREQ[Hz]'].to_numpy(float)
+    eps_re = frame['epsRE[-]'].to_numpy(float)
+    sigma_re = frame['sigmaRE[S/m]'].to_numpy(float)
+    omega = 2.0 * np.pi * freq
+    denominator = sigma_re + 1j * omega * EPS0 * eps_re
+    with np.errstate(divide='ignore', invalid='ignore'):
+        z_eq = np.where(np.abs(denominator) > 0, 1.0 / denominator, np.nan + 0j)
+    return z_eq
+
+
+def frame_to_impedance(frame):
+    """
+    统一把数据帧转换为复数阻抗向量
+
+    - ECM 数据帧: Z = Rs + jX
+    - MT 数据帧: Z = 1/(σ + j·ω·ε0·ε')（等效阻抗）
+    """
+    if frame is None or not hasattr(frame, 'columns'):
+        return None
+    columns = set(frame.columns)
+    if {'Rs[ohm]', 'X[ohm]'}.issubset(columns):
+        return frame['Rs[ohm]'].to_numpy(float) + 1j * frame['X[ohm]'].to_numpy(float)
+    return mt_frame_to_zeq(frame)
+
+
+def detect_data_mode(frame):
+    """
+    按数据帧列名判定数据类型, 供结果指标表选择 ECM/MT 列布局
+
+    返回: 'ECM' / 'MT' / None(无法判定)
+    """
+    if frame is None or not hasattr(frame, 'columns'):
+        return None
+    columns = set(frame.columns)
+    if {'Rs[ohm]', 'X[ohm]'}.issubset(columns):
+        return 'ECM'
+    if {'FREQ[Hz]', 'epsRE[-]', 'sigmaRE[S/m]'}.issubset(columns):
+        return 'MT'
+    return None
+
+
 # import numpy as np
 # import matplotlib.pyplot as plt
 
@@ -100,6 +158,8 @@ class resultWidget(QWidget):  ############输出仿真结果
         self.fit_results = list()
         # 当前数据集数量(由实际数据推算)
         self.dataset_count = 0
+        # 当前数据类型('ECM'/'MT'/None, 由数据帧列名判定, 供结果指标表选列布局)
+        self.data_mode = None
 
     def set_fitting_widget(self, widget):
         """记录 Fitting 控件引用, 便于读取 lmfit 拟合结果(信号载荷保持不变)"""
@@ -222,15 +282,11 @@ class resultWidget(QWidget):  ############输出仿真结果
             if prodata and len(prodata) > orig_index:
                 data_dict = prodata[orig_index]
                 print(f"[getsingal] prodata[{orig_index}]类型: {type(data_dict)}")
-                # 检测数据类型：MT数据包含 epsRE[-]，ECM数据包含 Rs[ohm]
-                if 'epsRE[-]' in data_dict.columns:
-                    # MT数据格式：使用 epsRE 和 sigmaRE
-                    epsRE = data_dict['epsRE[-]'].values
-                    sigmaRE = data_dict['sigmaRE[S/m]'].values
-                    Z_data = epsRE + 1j * sigmaRE
-                elif 'Rs[ohm]' in data_dict.columns:
-                    # ECM数据格式：使用 Rs 和 X
-                    Z_data = data_dict['Rs[ohm]'].values + 1j * data_dict['X[ohm]'].values
+                # 数据类型由列名判定(ECM: Rs/X 列; MT: epsRE/sigmaRE 列)
+                self.data_mode = detect_data_mode(data_dict)
+                # 统一转换为复数阻抗(ECM: Rs+jX; MT: 等效阻抗 1/(σ+jωε0ε'))
+                Z_data = frame_to_impedance(data_dict)
+                if Z_data is not None:
                     print(f"[getsingal] Z_data构建成功: {Z_data[:3]}...")
 
             # 获取拟合数据 - inputdata是交错排列的[原始数据, 拟合数据, 原始数据, 拟合数据, ...]
@@ -239,18 +295,13 @@ class resultWidget(QWidget):  ############输出仿真结果
             if inputdata and len(inputdata) > fitted_index:
                 fitted_dict = inputdata[fitted_index]
                 print(f"[getsingal] inputdata[{fitted_index}]类型: {type(fitted_dict)}")
-                if hasattr(fitted_dict, 'columns'):
-                    if 'Rs[ohm]' in fitted_dict.columns:
-                        # ECM 数据格式
-                        Z_fitted = fitted_dict['Rs[ohm]'].values + 1j * fitted_dict['X[ohm]'].values
-                        print(f"[getsingal] Z_fitted(ECM)构建成功: {Z_fitted[:3]}...")
-                    elif 'epsRE[-]' in fitted_dict.columns:
-                        # MT 数据格式
-                        Z_fitted = fitted_dict['epsRE[-]'].values + 1j * fitted_dict['sigmaRE[S/m]'].values
-                        print(f"[getsingal] Z_fitted(MT)构建成功: {Z_fitted[:3]}...")
+                Z_fitted = frame_to_impedance(fitted_dict)
+                if Z_fitted is not None:
+                    print(f"[getsingal] Z_fitted构建成功: {Z_fitted[:3]}...")
 
             fit_result = fit_results[dataset_index] if dataset_index < len(fit_results) else None
-            self.update_overall_results_table(fit_result, Z_data, Z_fitted, dataset_index)
+            self.update_overall_results_table(fit_result, Z_data, Z_fitted, dataset_index,
+                                              mode=self.data_mode)
 
     def update_results_table(self, dataset_index=0):
         """
@@ -310,15 +361,16 @@ class resultWidget(QWidget):  ############输出仿真结果
 
         print(f'更新结果表格: {table.rowCount()} 行')
 
-    def update_overall_results_table(self, fit_result=None, Z_data=None, Z_fitted=None, dataset_index=0):
+    def update_overall_results_table(self, fit_result=None, Z_data=None, Z_fitted=None, dataset_index=0, mode=None):
         """
         更新整体拟合结果表格，显示R²、RMSE等整体拟合质量指标
 
         参数:
             fit_result: lmfit 拟合结果对象
-            Z_data: 原始阻抗数据 (复数数组)
-            Z_fitted: 拟合阻抗数据 (复数数组)
+            Z_data: 原始数据 (复数数组; MT 为等效阻抗)
+            Z_fitted: 拟合数据 (复数数组; MT 为等效阻抗)
             dataset_index: 数据集索引
+            mode: 'ECM' / 'MT'; 缺省时由 updateResultsTable 按残差长度自动推断
         """
         print("\n" + "-"*40)
         print(f"[update_overall_results_table] 开始更新整体结果表格")
@@ -331,7 +383,7 @@ class resultWidget(QWidget):  ############输出仿真结果
             return
 
         # 调用 resultsui 的 updateResultsTable 方法更新 resultstable
-        self.resultsui.updateResultsTable(fit_result, Z_data, Z_fitted, dataset_index)
+        self.resultsui.updateResultsTable(fit_result, Z_data, Z_fitted, dataset_index, mode=mode)
         print(f"[update_overall_results_table] 完成，结果已写入 resultstable")
 
     def on_dataset_selector_changed(self, index):
@@ -356,29 +408,17 @@ class resultWidget(QWidget):  ############输出仿真结果
         Z_fitted = None
         # prodata 为交错排列: [原始数据0, 拟合数据0, 原始数据1, 拟合数据1, ...]
         orig_index = index * 2
+        mode = None
         if prodata and len(prodata) > orig_index:
-            data_dict = prodata[orig_index]
-            # 检测数据类型：MT数据包含 epsRE[-]，ECM数据包含 Rs[ohm]
-            if 'epsRE[-]' in data_dict.columns:
-                # MT数据格式
-                epsRE = data_dict['epsRE[-]'].values
-                sigmaRE = data_dict['sigmaRE[S/m]'].values
-                Z_data = epsRE + 1j * sigmaRE
-            elif 'Rs[ohm]' in data_dict.columns:
-                # ECM数据格式
-                Z_data = data_dict['Rs[ohm]'].values + 1j * data_dict['X[ohm]'].values
+            mode = detect_data_mode(prodata[orig_index])
+            Z_data = frame_to_impedance(prodata[orig_index])
         # 获取拟合数据 - prodata是交错排列的[原始数据, 拟合数据, 原始数据, 拟合数据, ...]
         # Z_fitted应该在prodata的奇数索引位置
         fitted_index = index * 2 + 1
         if prodata and len(prodata) > fitted_index:
-            fitted_dict = prodata[fitted_index]
-            if hasattr(fitted_dict, 'columns'):
-                if 'Rs[ohm]' in fitted_dict.columns:
-                    Z_fitted = fitted_dict['Rs[ohm]'].values + 1j * fitted_dict['X[ohm]'].values
-                elif 'epsRE[-]' in fitted_dict.columns:
-                    Z_fitted = fitted_dict['epsRE[-]'].values + 1j * fitted_dict['sigmaRE[S/m]'].values
+            Z_fitted = frame_to_impedance(prodata[fitted_index])
 
-        self.update_overall_results_table(fit_results[index], Z_data, Z_fitted, index)
+        self.update_overall_results_table(fit_results[index], Z_data, Z_fitted, index, mode=mode)
 
 
 class bottomLWidget(QWidget):
