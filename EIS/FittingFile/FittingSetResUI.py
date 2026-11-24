@@ -46,6 +46,55 @@ MT_RESULT_HEADERS = ['Dataset', 'NFev', 'NData', 'RMS rel err (%)',
                      "RMS(ε') (%)", "RMS(σ') (%)", 'Max rel err (%)',
                      'Reduced χ²', 'BIC', 'NParam']
 
+# 各列量的 tooltip(英文, 说明计算方法与判读方式), 鼠标悬停表头时显示
+RESULT_HEADER_TOOLTIPS = {
+    'Dataset': 'Current dataset index (view each group when batch-fitting '
+               'multiple datasets)',
+    'NFev': 'Number of objective-function evaluations (excludes the HN '
+            'grid-scan stage). Workload indicator: > ~2000 usually indicates '
+            'model mismatch or poor initial values',
+    'NData': 'Number of observations used in the fit: ECM = number of frequency '
+             'points N; MT = 2N (N each for the ε′/σ′ channels)',
+    'RMS rel err (%)': '100·sqrt(chisqr/NData). Residuals are per-point relative '
+                       'errors (ECM: |ΔZ|/|Z|; MT: per-channel ε′/σ′), i.e. the '
+                       'average relative deviation. Primary metric: compare against '
+                       'the measurement noise level (much higher than noise = '
+                       'mismatch; much lower = possible overfitting)',
+    'R²': '1 − Σ|Z_data−Z_fit|² / Σ|Z_data−mean(Z_data)|² (impedance scale). '
+          'Dominated by low-frequency |Z| points; sanity check only, do not '
+          'judge fit quality from R² alone',
+    'RMSE (Ω)': 'sqrt(Σ|Z_data−Z_fit|²/NData), absolute error in ohms. '
+                'Scale-dependent: compare only between models on the same dataset',
+    "RMS(ε') (%)": "100·sqrt(mean(first N residuals²)), relative RMS of the ε′ "
+                   "(real permittivity) channel; locates which channel is mismatched",
+    "RMS(σ') (%)": "100·sqrt(mean(last N residuals²)), relative RMS of the σ′ "
+                   "(real conductivity) channel; locates which channel is mismatched",
+    'Max rel err (%)': '100·max(|residual|), worst single point/channel relative '
+                       'deviation; reveals local mismatch hidden by the RMS average',
+    'Reduced χ²': 'chisqr/(NData−NParam), RMS rel err rescaled by degrees of '
+                 'freedom. Note: residuals are relative errors, not 1/σ-weighted '
+                 '— do not use the textbook “≈1 means good” rule; compare against '
+                 'the noise-scaled baseline instead',
+    'BIC': 'NData·ln(RSS/NData)+NParam·ln(NData). Model selection: pick the lowest '
+           'among models on the same dataset (ΔBIC > 10 is decisive); not '
+           'comparable across datasets or between ECM and MT',
+    'NParam': 'Number of free parameters, len(var_names). Context for judging '
+              'overfitting and interpreting the BIC complexity penalty',
+}
+
+
+def apply_result_header_tooltips(table, headers):
+    """
+    为结果表水平表头逐列设置 tooltip。
+
+    setHorizontalHeaderLabels 会重建表头项(丢失已设 tooltip),
+    因此每次设置表头后都需重新调用。
+    """
+    for col, name in enumerate(headers):
+        item = table.horizontalHeaderItem(col)
+        if item is not None and name in RESULT_HEADER_TOOLTIPS:
+            item.setToolTip(RESULT_HEADER_TOOLTIPS[name])
+
 class settingUI():
     def setupUI(self, widget):
         settings = Settings()        # LOAD SETTINGS
@@ -309,6 +358,7 @@ class resultsUI():
         default_headers = ECM_RESULT_HEADERS
         self.resultstable.setColumnCount(len(default_headers))
         self.resultstable.setHorizontalHeaderLabels(default_headers)
+        apply_result_header_tooltips(self.resultstable, default_headers)
         self.resultstable.verticalHeader().setVisible(False)
         self.resultstable.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.resultstable.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -531,6 +581,8 @@ class resultsUI():
         
         # 第一行：表头（与 ECM/MT_RESULT_HEADERS 一致）
         self.resultstable.setHorizontalHeaderLabels(headers)
+        # 表头项被重建, tooltip 需随表头一并重设
+        apply_result_header_tooltips(self.resultstable, headers)
         
         # 第二行：数值（第一行的单元格）
         for i, (name, value) in enumerate(metrics):
