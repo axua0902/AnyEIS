@@ -1,0 +1,125 @@
+{
+    "MT_Debye": {
+        "model_name": "Debye",
+        "truth": {
+            "epsh": 6.0,
+            "sigmaDC": 0.0003,
+            "Deps1": 30.0,
+            "Tao1": 2e-06
+        },
+        "init": {
+            "epsh": 4.0,
+            "sigmaDC": 0.0001,
+            "Deps1": 12.0,
+            "Tao1": 8e-07
+        },
+        "bounds": {
+            "epsh": [
+                0.0,
+                100.0
+            ],
+            "sigmaDC": [
+                0.0,
+                1.0
+            ],
+            "Deps1": [
+                0.0,
+                200.0
+            ],
+            "Tao1": [
+                1e-12,
+                0.01
+            ]
+        },
+        "model_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_Debye.json",
+        "data_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_Debye.xlsx"
+    },
+    "MT_DavidsonCole": {
+        "model_name": "Davidson-Cole",
+        "truth": {
+            "epsh": 12.0,
+            "sigmaDC": 0.00015,
+            "Deps1": 40.0,
+            "Tao1": 5e-06,
+            "Beta1": 0.75
+        },
+        "init": {
+            "epsh": 8.0,
+            "sigmaDC": 0.0005,
+            "Deps1": 20.0,
+            "Tao1": 2e-06,
+            "Beta1": 0.55
+        },
+        "bounds": {
+            "epsh": [
+                0.0,
+                100.0
+            ],
+            "sigmaDC": [
+                0.0,
+                1.0
+            ],
+            "Deps1": [
+                0.0,
+                300.0
+            ],
+            "Tao1": [
+                1e-12,
+                0.01
+            ],
+            "Beta1": [
+                0.0,
+                1.0
+            ]
+        },
+        "model_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_DavidsonCole.json",
+        "data_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_DavidsonCole.xlsx"
+    },
+    "MT_HavriliakNegami": {
+        "model_name": "Havriliak-Negami",
+        "truth": {
+            "epsh": 8.0,
+            "sigmaDC": 0.0002,
+            "Deps1": 60.0,
+            "Tao1": 1e-05,
+            "Alpha1": 0.85,
+            "Beta1": 0.7
+        },
+        "init": {
+            "epsh": 5.0,
+            "sigmaDC": 0.0005,
+            "Deps1": 25.0,
+            "Tao1": 3e-06,
+            "Alpha1": 0.6,
+            "Beta1": 0.9
+        },
+        "bounds": {
+            "epsh": [
+                0.0,
+                100.0
+            ],
+            "sigmaDC": [
+                0.0,
+                1.0
+            ],
+            "Deps1": [
+                0.0,
+                300.0
+            ],
+            "Tao1": [
+                1e-12,
+                0.01
+            ],
+            "Alpha1": [
+                0.0,
+                1.0
+            ],
+            "Beta1": [
+                0.0,
+                1.0
+            ]
+        },
+        "model_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_HavriliakNegami.json",
+        "data_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_HavriliakNegami.xlsx"
+    }
+}

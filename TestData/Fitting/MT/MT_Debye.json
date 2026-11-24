@@ -1,0 +1,50 @@
+{
+    "version": "1.0",
+    "model_type": "MT",
+    "model_name": "Debye",
+    "file_path": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\MT_Debye.json",
+    "created_date": "2026-11-24",
+    "frequency": {
+        "min": 10.0,
+        "max": 1000000000.0,
+        "distribution": "Log",
+        "unit": "Hz"
+    },
+    "option": {
+        "EP": 0,
+        "DC Conductivity": 1
+    },
+    "model_terms": [
+        {
+            "name": "1",
+            "modeltype": "Debye",
+            "expression": "Deps1/(1+j*omega*Tao1)"
+        }
+    ],
+    "parameters": [
+        {
+            "name": "epsh",
+            "init": 4.0,
+            "min": 0.0,
+            "max": 100.0
+        },
+        {
+            "name": "sigmaDC",
+            "init": 0.0001,
+            "min": 0.0,
+            "max": 1.0
+        },
+        {
+            "name": "Deps1",
+            "init": 12.0,
+            "min": 0.0,
+            "max": 200.0
+        },
+        {
+            "name": "Tao1",
+            "init": 8e-07,
+            "min": 1e-12,
+            "max": 0.01
+        }
+    ]
+}

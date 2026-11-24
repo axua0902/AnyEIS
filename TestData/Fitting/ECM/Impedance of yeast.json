@@ -1,0 +1,70 @@
+{
+    "version": "1.0",
+    "model_type": "ECM",
+    "model_name": "Impedance of yeast",
+    "file_path": "e:/Research/paper/6.AnyEIS Software/AnyEIS/TestData/Fitting/ECM/Impedance of yeast.json",
+    "created_date": "2026-11-17",
+    "frequency": {
+        "min": 1000000.0,
+        "max": 3000000000.0,
+        "points": 200,
+        "unit": "Hz"
+    },
+    "circuit_string": "R1+p(CPE1,R2)+p(C2,R3)",
+    "parameters": [
+        {
+            "name": "R1",
+            "display_name": "",
+            "value": 2.0,
+            "unit": "ohm",
+            "min": 0.001,
+            "max": 1000000000000.0,
+            "fixed": false
+        },
+        {
+            "name": "CPE1",
+            "display_name": "Q",
+            "value": 1e-10,
+            "unit": "F s^(n-1)",
+            "min": 1e-15,
+            "max": 0.001,
+            "fixed": false
+        },
+        {
+            "name": "alphaCPE1",
+            "display_name": "n",
+            "value": 0.9,
+            "unit": "",
+            "min": 0.5,
+            "max": 1.0,
+            "fixed": false
+        },
+        {
+            "name": "R2",
+            "display_name": "",
+            "value": 1200.0,
+            "unit": "ohm",
+            "min": 0.001,
+            "max": 1000000000000.0,
+            "fixed": false
+        },
+        {
+            "name": "C2",
+            "display_name": "",
+            "value": 1e-12,
+            "unit": "F",
+            "min": 1e-15,
+            "max": 0.001,
+            "fixed": false
+        },
+        {
+            "name": "R3",
+            "display_name": "",
+            "value": 200.0,
+            "unit": "ohm",
+            "min": 0.001,
+            "max": 1000000000000.0,
+            "fixed": false
+        }
+    ]
+}
