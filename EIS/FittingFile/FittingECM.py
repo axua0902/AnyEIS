@@ -1184,14 +1184,17 @@ def _auto_fitting_core(freq, prodata, circuit, init_params, method='least_square
         # (>= 2 个 p(...) 并联支路)上同样容易陷入局部最优/停在初值
         if _detect_multi_solution_risk(circuit) and method in (
                 'least_squares', 'nelder', 'powell', 'cg', 'bfgs', 'lbfgsb'):
+            # 消息为英汉双语两行格式, 不用 emoji (静默模式打印到 GBK 控制台会报错)
             _emit_warning(
-                f"⚠️ 当前电路可能存在多解性，{method} 是局部方法，\n"
-                f"容易陷入局部最优。\n\n"
-                f"建议切换到以下全局方法之一:\n"
-                f"  • differential_evolution (推荐, 稳定)\n"
-                f"  • dual_annealing (快)\n"
-                f"  • ampgo (最准, 但慢)\n"
-                f"\n(继续用 {method} 拟合, 可能得到次优解)"
+                f"Multi-solution risk detected: {method} is a local "
+                f"optimizer and may get stuck in a local minimum.\n"
+                f"检测到多解风险：{method} 为局部方法，易陷入局部最优。\n\n"
+                f"Suggested global methods / 建议改用全局方法:\n"
+                f"  • differential_evolution (recommended / 推荐)\n"
+                f"  • dual_annealing (fast / 快)\n"
+                f"  • ampgo (most accurate / 最准, but slow / 但慢)\n\n"
+                f"Continuing with {method} may give a suboptimal fit.\n"
+                f"继续用 {method} 可能得到次优解。"
             )
 
         # ====== 问题 5: mΩ-MΩ 量级差 R 物理约束 ======
