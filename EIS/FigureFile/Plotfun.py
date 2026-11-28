@@ -180,6 +180,7 @@ class MyMplCanvas(FigureCanvas):
         ax.grid(True)
 
         has_data = False
+        axis_names = None
         for i in range(0, len(outputlist)):
             if outputlist[i] == 1:
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
@@ -192,9 +193,13 @@ class MyMplCanvas(FigureCanvas):
 
                     self._plot_curve(ax, x, y, dataname[i], i)
                     has_data = True
+                    # 坐标轴名称取自实际表头(多数据集时取首个可用数据)
+                    if axis_names is None:
+                        axis_names = (str(colname[0]), str(colname[col_index]))
 
-        ax.set_xlabel("X", fontsize=12)
-        ax.set_ylabel(ylabel, fontsize=12)
+        xlabel, ylabel_final = axis_names if axis_names else ("X", ylabel)
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.set_ylabel(ylabel_final, fontsize=12)
         ax.tick_params(axis="both", labelsize=12)
 
         if has_data:

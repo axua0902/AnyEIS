@@ -7,7 +7,9 @@ import xlsxwriter
 def creatanyfile(wbname, dataname, data):  ########for creat excel file which data is from python calculate
 
     headings = list(data[0].columns)
-    dataInfo = {'headingsNum': len(headings), 'curveNum': len(dataname), 'dataNum': len(headings)}
+    # 保留实际列名, 供 General/Time order 导出图使用表头作为坐标轴名称
+    dataInfo = {'headingsNum': len(headings), 'curveNum': len(dataname),
+                'dataNum': len(headings), 'headings': headings}
     writeInfo = {'curvenamerow': 0, 'headingsrow': 1, 'datarow': 2}
     name = [[i] for i in dataname]
     workbook = xlsxwriter.Workbook(wbname, {'nan_inf_to_errors': True})  # 创建一个excel

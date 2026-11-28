@@ -168,6 +168,16 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 
 > 未处理（按要求保持原样）：`Data/` 下旧副本仍存在 PHASE 弧度 / `Z=Rs`，加载时由 check7 自动换算、check8 告警，不改动文件本身。
 
+### 2.8 一般/时间序列绘图轴名与测试数据（2026-11-28）
+
+| 项 | 内容 | 状态 |
+|----|------|------|
+| 列名传递 | `EIS/FigureFile/Figurefun.py` → `creatanyfile`：`dataInfo` 增加 `headings` 保存实际列名 | ✅ 已完成 |
+| Excel 导出图 | `EIS/FigureFile/OtherFigurefun.py` → `Generalfiguremaker` / `TIMEfiguremaker`：X 轴取 `headings[0]`、各 Y 轴取对应列名，替代硬编码 `X`/`Y{i}`、`Time`/`Data{i}`；无表头时保留原兜底 | ✅ 已完成 |
+| 应用内绘图 | `EIS/FigureFile/Plotfun.py` → `_plot_normal_single`：轴名取 `colname[0]` / `colname[col_index]`，多数据集同图取首个可用表头 | ✅ 已完成 |
+| 测试数据 | `TestData/Input/input_normal` 新增 4 个 General xlsx（浓度 / 温度 / I-V / SoC）；`TestData/Input/input_time order` 新增 4 个 Time order xlsx（阻抗监测 / OCP 漂移 / 温度循环 / 计时电流） | ✅ 已完成 |
+| 验证 | `readfile` 读取 8 个新文件全部成功；导出图 chart XML 轴名与 `plotNormal` 轴名均为真实表头 | ✅ 通过 |
+
 ---
 
 ## 三、新问题记录模板
@@ -203,7 +213,8 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 
 历史条目汇总：Bug 系列 8 条（7 已修复 + Bug #007 Phase 1/2 已修复）、TP 系列 18 条
 （13 已修复 / 2 已解决 / 2 复审撤销或降级 / 3 不修复）、MT 系列 6 条（全部完成）。
-另：2026-11-28 数据读取与列语义系列 9 项已完成（详见 §2.7）。
+另：2026-11-28 数据读取与列语义系列 9 项已完成（详见 §2.7）；
+2026-11-28 一般/时间序列绘图轴名与测试数据系列 1 项已完成（详见 §2.8）。
 **无未决缺陷。**
 
 ---
@@ -225,6 +236,7 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 | 2026-11-17 | 文档整理 | 压缩已完成条目细节，补充 CPE / 审稿实施记录与时间线 | |
 | 2026-11-17 | R4 | 模型 JSON 追加 `fitting_settings`（`ECMFunctions.create_ecm_model_json`），旧 JSON 兼容性回归通过 | 详见 §2.6 |
 | 2026-11-28 | 数据读取 | PHASE 单位自检与数据修正、Z 列口径统一、一般数据列名、CSV 精确匹配、check7/8 鲁棒化 | 详见 §2.7 |
+| 2026-11-28 | 绘图 | General/Time order 导出图与应用内绘图轴名改用文件实际表头；新增 8 个一般/时间序列测试数据 | 详见 §2.8 |
 
 ---
 

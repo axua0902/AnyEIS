@@ -54,10 +54,15 @@ def TIMEfiguremaker(workbook, worksheet, dataInfo, writeInfo):
         chart_pos = f"{col_positions[col_index]}{chart_row}"
         chart_positions.append(chart_pos)
 
+    # 坐标轴名称取自数据实际表头: 第1列为x轴, 其余列各自为y轴
+    headings = list(dataInfo.get('headings', []))
+
     # 根据数据列数动态生成时序图表
     for i in range(1, datanum):  # 从第1列开始（第0列是时间轴）
-        infoX = {'Xlabel': "Time", 'Axial': 'nonLog'}
-        infoY = {'Ylabel': f"Data{i}", 'Axial': 'nonLog', 'Reverse': False}
+        xlabel = str(headings[0]) if len(headings) > 0 else "Time"
+        ylabel = str(headings[i]) if len(headings) > i else f"Data{i}"
+        infoX = {'Xlabel': xlabel, 'Axial': 'nonLog'}
+        infoY = {'Ylabel': ylabel, 'Axial': 'nonLog', 'Reverse': False}
         
         chart_position = chart_positions[i - 1] if i - 1 < len(chart_positions) else 'D6'
         
@@ -88,10 +93,15 @@ def Generalfiguremaker(workbook, worksheet, dataInfo, writeInfo):
         chart_pos = f"{col_positions[col_index]}{chart_row}"
         chart_positions.append(chart_pos)
 
+    # 坐标轴名称取自数据实际表头: 第1列为x轴, 其余列各自为y轴
+    headings = list(dataInfo.get('headings', []))
+
     # 根据数据列数动态生成图表
     for i in range(1, datanum):  # 从第1列开始（第0列是x轴）
-        infoX = {'Xlabel': "X", 'Axial': 'nonLog'}
-        infoY = {'Ylabel': f"Y{i}", 'Axial': 'nonLog', 'Reverse': False}
+        xlabel = str(headings[0]) if len(headings) > 0 else "X"
+        ylabel = str(headings[i]) if len(headings) > i else f"Y{i}"
+        infoX = {'Xlabel': xlabel, 'Axial': 'nonLog'}
+        infoY = {'Ylabel': ylabel, 'Axial': 'nonLog', 'Reverse': False}
         
         chart_position = chart_positions[i - 1] if i - 1 < len(chart_positions) else 'D6'
         
