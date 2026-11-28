@@ -298,6 +298,85 @@ def check6_freq_consistency(prodata, refdata, rtol_log=1e-3):
     print('check6 (freq consistency) pass')
     return 1
 
+
+def check7_phase_unit(df, dataname='', tol_deg=0.05, fix=True):
+    """
+    PHASE 列单位自检(弧度/角度) / PHASE column unit self-check
+
+    背景: 部分数据导出工具把相位角按"弧度"写入, 却沿用 'PHASE[deg]' 表头。
+    f-Phase 图会把原始数据(弧度)与拟合模型(度)画在同一坐标轴上, 两者相差
+    180/π ≈ 57.3 倍, 看起来"拟合差异巨大", 而 Nyquist / f-Re(Z) / f-Im(Z)
+    完全正常(它们只用 Rs/X 列, 拟合引擎也只用 Rs/X)。
+
+    判定基准: 由 Rs/X 列重建相位角 arctan2(X, Rs)(单位: 度), 与 PHASE 列比较:
+      1. PHASE ≈ 基准                       -> 度, 正常, 不处理
+      2. PHASE×180/π ≈ 基准 且 PHASE 明显不是度 -> 弧度, fix=True 时
+         原地换算 PHASE×180/π 并打印告警
+      3. 两者都不符                          -> 仅打印告警
+         (PHASE 与 Rs/X 不自洽), 不改动数据
+    缺少 PHASE/Rs/X 列(如介电/通用数据)或有效行 < 2 时静默跳过, 不打扰。
+
+    Args:
+        df: pandas DataFrame(阻抗数据, 列名支持常见变体, resolve_column 容错匹配)
+        dataname: 数据名, 仅用于告警信息
+        tol_deg: 单位判定容差(度)。0.05 可容忍 PHASE 列 2~3 位小数的四舍五入
+                 (实测数据文件 err ≈ 5e-4 度, 弧度文件按度读取 err ≈ 80 度,
+                 两者相距 3 个数量级以上, 阈值取中间偏保守值)
+        fix: 判定为弧度时是否自动换算为度(默认 True)
+
+    Returns:
+        (status, info)
+        status ∈ {'ok', 'fixed', 'inconsistent', 'skipped'}
+    """
+    import numpy as np
+
+    if df is None or not hasattr(df, 'columns'):
+        return 'skipped', 'no dataframe'
+
+    ph_col = resolve_column(df, ['PHASE[deg]', 'PHASE[DEG]', 'PHASE', 'ph'])
+    rs_col = resolve_column(df, ['Rs[ohm]', 'RS[OHM]', 'Rs', 'R'])
+    x_col = resolve_column(df, ['X[ohm]', 'X[OHM]', 'X'])
+    if ph_col is None or rs_col is None or x_col is None:
+        return 'skipped', 'PHASE/Rs/X columns not found'
+
+    try:
+        phase = df[ph_col].to_numpy(dtype=float)
+        rs = df[rs_col].to_numpy(dtype=float)
+        x = df[x_col].to_numpy(dtype=float)
+    except (TypeError, ValueError):
+        return 'skipped', 'non-numeric PHASE/Rs/X'
+
+    # 有效行: 三列均有限, 且 (Rs, X) 不全为 0(arctan2(0,0) 无定义)
+    valid = (np.isfinite(phase) & np.isfinite(rs) & np.isfinite(x)
+             & ~((rs == 0) & (x == 0)))
+    if int(np.sum(valid)) < 2:
+        return 'skipped', 'not enough valid rows'
+
+    phase_ref_deg = np.degrees(np.arctan2(x[valid], rs[valid]))
+    err_deg = float(np.max(np.abs(phase[valid] - phase_ref_deg)))
+    err_rad = float(np.max(np.abs(np.degrees(phase[valid]) - phase_ref_deg)))
+
+    # 1) 度: 与基准吻合
+    if err_deg <= tol_deg:
+        return 'ok', f'degrees (err_deg={err_deg:.2e})'
+
+    # 2) 弧度: ×180/π 后与基准吻合, 且原值明显不是度
+    if err_rad <= tol_deg and err_deg > 10 * tol_deg:
+        if fix:
+            df[ph_col] = df[ph_col] * 180.0 / np.pi
+            print(f'[check7] "{dataname}": PHASE column stored in RADIANS '
+                  f'under a [deg] header; auto-converted to degrees (x180/pi)')
+            return 'fixed', f'radians->degrees (err_rad={err_rad:.2e}, err_deg={err_deg:.3f})'
+        print(f'[check7] WARNING: "{dataname}": PHASE column appears to be '
+              f'in RADIANS (mismatch as degrees: {err_deg:.3f} deg); left unchanged')
+        return 'inconsistent', 'radians detected, fix disabled'
+
+    # 3) 两种单位都不吻合: 仅告警, 不改动
+    print(f'[check7] WARNING: "{dataname}": PHASE column inconsistent with '
+          f'arctan2(X, Rs) (err_deg={err_deg:.3f} deg, err_rad={err_rad:.3f} deg); '
+          f'left unchanged')
+    return 'inconsistent', f'err_deg={err_deg:.3f}, err_rad={err_rad:.3f}'
+
 ##################################数据检查#############################
 
 

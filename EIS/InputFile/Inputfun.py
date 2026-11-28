@@ -1,6 +1,8 @@
 from numpy import size
 from pandas import read_csv, read_excel, DataFrame
 
+from EIS.Other.Datacheck import check7_phase_unit
+
 
 def readcsvfile(filepath):
     ###############参考名表############
@@ -58,6 +60,9 @@ def readcsvfile(filepath):
 
     datadict = {namelist[0]: freq, namelist[1]: Z, namelist[2]: phy, namelist[3]: Rs, namelist[4]: X}  #######组合生成数据
     data.append(DataFrame(datadict))
+
+    # PHASE 单位自检: PHASE[deg] 列误存弧度时自动换算为度(check7)
+    check7_phase_unit(data[0], dataname[0])
 
     return dataname, data
 
@@ -143,6 +148,11 @@ def readexcelfile(filepath):
                 columnsname[temcolumnsname] = nametemp
         data[temnamelist].columns = columnsname
     ########## 读取数据列名 ##########
+
+    # PHASE 单位自检: PHASE[deg] 列误存弧度时自动换算为度(check7)
+    for temdata in range(0, datanum):
+        check7_phase_unit(data[temdata], datanamelist[temdata])
+
     return datanamelist, data
 
 
