@@ -1,0 +1,107 @@
+{
+    "version": "1.0",
+    "model_type": "MT",
+    "model_name": "Aqueous Solution  0.01mol L 25C",
+    "file_path": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\Aqueous Solution  0.01mol L 25C.json",
+    "created_date": "2026-11-28",
+    "frequency": {
+        "min": 1000000.0,
+        "max": 10000000000.0,
+        "distribution": "Log",
+        "unit": "Hz"
+    },
+    "option": {
+        "EP": 0,
+        "DC Conductivity": 1
+    },
+    "model_terms": [
+        {
+            "name": "1",
+            "modeltype": "Debye",
+            "expression": "Deps1/(1+j*omega*Tao1)"
+        }
+    ],
+    "parameters": [
+        {
+            "name": "epsh",
+            "init": 16.583366003710353,
+            "min": 0.0,
+            "max": 100.0
+        },
+        {
+            "name": "sigmaDC",
+            "init": 10.30886143272447,
+            "min": 0.0,
+            "max": 1000.0
+        },
+        {
+            "name": "Deps1",
+            "init": 62.08312522006138,
+            "min": 0.0,
+            "max": 200.0
+        },
+        {
+            "name": "Tao1",
+            "init": 9.031041995292579e-12,
+            "min": 1e-15,
+            "max": 0.01
+        }
+    ],
+    "fitting_results": {
+        "fitted_date": "2026-11-28 00:01:47",
+        "engine": "EIS/FittingFile/Fitting.py::MTcalculation -> FittingMT.FittingMT (least_squares)",
+        "data_file": "e:\\Research\\paper\\6.AnyEIS Software\\AnyEIS\\TestData\\Fitting\\MT\\Aqueous Solution  0.01mol L 25C.xlsx",
+        "n_points": 200,
+        "chi2": 0.2857609476786211,
+        "chi2_red": 0.0007216185547439926,
+        "rms_rel_percent": {
+            "eps_RE": 0.4804912440341261,
+            "sigma_RE": 3.7492900058994625,
+            "combined": 2.6728306515687685
+        },
+        "max_rel_percent": {
+            "eps_RE": 1.001534560614352,
+            "sigma_RE": 10.4667288017192
+        },
+        "per_decade_rms_percent": {
+            "6-7": {
+                "n": 50,
+                "eps_RE": 0.4686047502282632,
+                "sigma_RE": 0.5035275238358915
+            },
+            "7-8": {
+                "n": 50,
+                "eps_RE": 0.4687936284438527,
+                "sigma_RE": 0.4727922689868866
+            },
+            "8-9": {
+                "n": 50,
+                "eps_RE": 0.4697593040035557,
+                "sigma_RE": 1.9373292494523957
+            },
+            "9-10": {
+                "n": 49,
+                "eps_RE": 0.49835876670817764,
+                "sigma_RE": 7.129082206115226
+            }
+        },
+        "parameters": {
+            "epsh": {
+                "value": 16.583366003710353,
+                "stderr": 0.30797036935748895
+            },
+            "sigmaDC": {
+                "value": 10.30886143272447,
+                "stderr": 0.027602603149827577
+            },
+            "Deps1": {
+                "value": 62.08312522006138,
+                "stderr": 0.440918141141192
+            },
+            "Tao1": {
+                "value": 9.031041995292579e-12,
+                "stderr": 8.909641382174412e-11
+            }
+        }
+    }
+}
