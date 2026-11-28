@@ -1,7 +1,7 @@
 from numpy import size
 from pandas import read_csv, read_excel, DataFrame
 
-from EIS.Other.Datacheck import check7_phase_unit
+from EIS.Other.Datacheck import check7_phase_unit, check8_z_consistency
 
 
 def readcsvfile(filepath):
@@ -16,7 +16,6 @@ def readcsvfile(filepath):
     ###############参考名表############
 
     dataname = list()  ###s数据名
-    columslist = list()  ###s数据列名
     data = list()  ####s全部数据
 
     filename = filepath[filepath.rfind('/') + 1:-4]  ########数据名就是文件名
@@ -35,34 +34,38 @@ def readcsvfile(filepath):
 
     df = read_csv(filepath, skiprows=startcol, index_col=None)  # Read data
 
-    refecolomns = FREQnamelist + Znamelist + PHASEnamelist + Rsnamelist + Xnamelist
-    for refecolsttemp in refecolomns:
+    # 列名精确匹配(忽略大小写/首尾空格), 不再用子串匹配,
+    # 避免 'Z' 命中 'Zreal'、'R' 命中 'RPM' 之类的误配。
+    def _normcol(nametemp):
+        return str(nametemp).strip().upper()
+
+    def _pickcolumn(candidates):
+        candkeys = {_normcol(c) for c in candidates}
         for usecolstemp in columns:
-            if refecolsttemp in usecolstemp:
-                # print(usecolstemp)
-                columslist.append(usecolstemp)
-            else:
-                pass
+            if _normcol(usecolstemp) in candkeys:
+                return usecolstemp
+        return None
 
-    for i in range(0, len(columslist)):  # 分配数据
-        if columslist[i].upper() in FREQnamelist or columslist[i] in FREQnamelist:
-            freq = df.loc[:, columslist[i]]
-        elif columslist[i].upper() in Znamelist or columslist[i] in Znamelist:
-            Z = df.loc[:, columslist[i]]
-        elif columslist[i].upper() in PHASEnamelist or columslist[i] in PHASEnamelist:
-            phy = df.loc[:, columslist[i]]
-        elif columslist[i].upper() in Rsnamelist or columslist[i] in Rsnamelist:
-            Rs = df.loc[:, columslist[i]]
-        elif columslist[i].upper() in Xnamelist or columslist[i] in Xnamelist:
-            X = df.loc[:, columslist[i]]
-        else:
-            pass
+    freqcol = _pickcolumn(FREQnamelist)
+    Zcol = _pickcolumn(Znamelist)
+    phycol = _pickcolumn(PHASEnamelist)
+    Rscol = _pickcolumn(Rsnamelist)
+    Xcol = _pickcolumn(Xnamelist)
 
-    datadict = {namelist[0]: freq, namelist[1]: Z, namelist[2]: phy, namelist[3]: Rs, namelist[4]: X}  #######组合生成数据
+    colpairs = [(namelist[0], freqcol), (namelist[1], Zcol), (namelist[2], phycol),
+                (namelist[3], Rscol), (namelist[4], Xcol)]
+    missing = [nametemp for nametemp, coltemp in colpairs if coltemp is None]
+    if missing:
+        print('[readcsvfile] WARNING: "%s" 缺少列 %s' % (filename, missing))
+
+    datadict = {nametemp: df.loc[:, coltemp] for nametemp, coltemp in colpairs
+                if coltemp is not None}  #######组合生成数据
     data.append(DataFrame(datadict))
 
     # PHASE 单位自检: PHASE[deg] 列误存弧度时自动换算为度(check7)
     check7_phase_unit(data[0], dataname[0])
+    # Z 列一致性自检: Z[ohm] 误存实部(real)而非幅值时告警(check8)
+    check8_z_consistency(data[0], dataname[0])
 
     return dataname, data
 
@@ -117,41 +120,62 @@ def readexcelfile(filepath):
     ########## 读取数据 ##########
 
     ########## 读取数据列名 ##########
+    # 仅对 EIS/DS 数据重命名: 以"能识别出频率列"为前提。
+    # 一般数据(任意物理量, 如 v[mL] vs Z RE/IM)没有频率列, 原样保留列名。
+    # 重命名按物理列位置写入 columnsname[j], 不再写语义下标, 避免列顺序非标准时错位。
     colnum = size(data[0].columns)
-    columnsname = [0 for i in range(colnum)]
+    # 同一 xlsx 的多个数据块共享第 1 行表头, 后续块表头可能为空(Unnamed),
+    # 因此统一用 data[0] 的列名作母表头(与原实现一致), 再逐块按物理位置重命名。
+    nametemp_list = [str(col) for col in data[0].columns]
+    has_freq = any(
+        nametemp.upper() in FREQnamelist or nametemp in FREQnamelist
+        for nametemp in nametemp_list
+    )
     for temnamelist in range(0, datanum):
+        if not has_freq:  # 一般数据: 不改列名
+            data[temnamelist].columns = nametemp_list
+            continue
+        columnsname = [0 for i in range(colnum)]
         for temcolumnsname in range(0, colnum):  #####命名数据列
-            nametemp = str(data[0].columns[temcolumnsname])
+            nametemp = nametemp_list[temcolumnsname]
+            upname = nametemp.upper()
             #################impedance seies##########################
-            if nametemp.upper() in FREQnamelist or nametemp in FREQnamelist:
-                columnsname[0] = Impedancenamelist[0]
-            elif nametemp.upper() in Znamelist or nametemp in Znamelist:
-                columnsname[1] = Impedancenamelist[1]
-            elif nametemp.upper() in PHASEnamelist or nametemp in PHASEnamelist:
-                columnsname[2] = Impedancenamelist[2]
-            elif nametemp.upper() in Rsnamelist or nametemp in Rsnamelist:
-                columnsname[3] = Impedancenamelist[3]
-            elif nametemp.upper() in Xnamelist or nametemp in Xnamelist:
-                columnsname[4] = Impedancenamelist[4]
+            if upname in FREQnamelist or nametemp in FREQnamelist:
+                columnsname[temcolumnsname] = Impedancenamelist[0]
+            elif upname in Znamelist or nametemp in Znamelist:
+                columnsname[temcolumnsname] = Impedancenamelist[1]
+            elif upname in PHASEnamelist or nametemp in PHASEnamelist:
+                columnsname[temcolumnsname] = Impedancenamelist[2]
+            elif upname in Rsnamelist or nametemp in Rsnamelist:
+                columnsname[temcolumnsname] = Impedancenamelist[3]
+            elif upname in Xnamelist or nametemp in Xnamelist:
+                columnsname[temcolumnsname] = Impedancenamelist[4]
             ################impedance seies##########################
             ################Dielectric seies##########################
-            elif nametemp.upper() in perREnamelist or nametemp in perREnamelist:
-                columnsname[1] = Dielectricnamelist[1]
-            elif nametemp.upper() in perIMnamelist or nametemp in perIMnamelist:
-                columnsname[2] = Dielectricnamelist[2]
-            elif nametemp.upper() in conREnamelist or nametemp in conREnamelist:
-                columnsname[3] = Dielectricnamelist[3]
-            elif nametemp.upper() in conIMnamelist or nametemp in conIMnamelist:
-                columnsname[4] = Dielectricnamelist[4]
+            elif upname in perREnamelist or nametemp in perREnamelist:
+                columnsname[temcolumnsname] = Dielectricnamelist[1]
+            elif upname in perIMnamelist or nametemp in perIMnamelist:
+                columnsname[temcolumnsname] = Dielectricnamelist[2]
+            elif upname in conREnamelist or nametemp in conREnamelist:
+                columnsname[temcolumnsname] = Dielectricnamelist[3]
+            elif upname in conIMnamelist or nametemp in conIMnamelist:
+                columnsname[temcolumnsname] = Dielectricnamelist[4]
             ################Dielectricseies##########################
             else:
                 columnsname[temcolumnsname] = nametemp
         data[temnamelist].columns = columnsname
+        # 规整为标准列顺序: 下游绘图按位置取列(colname[0..4]), 仅改名不够
+        targetcols = [nametemp for nametemp in Impedancenamelist if nametemp in columnsname]
+        if len(targetcols) < 2:
+            targetcols = [nametemp for nametemp in Dielectricnamelist if nametemp in columnsname]
+        if len(targetcols) >= 2:
+            data[temnamelist] = data[temnamelist][targetcols]
     ########## 读取数据列名 ##########
 
     # PHASE 单位自检: PHASE[deg] 列误存弧度时自动换算为度(check7)
     for temdata in range(0, datanum):
         check7_phase_unit(data[temdata], datanamelist[temdata])
+        check8_z_consistency(data[temdata], datanamelist[temdata])
 
     return datanamelist, data
 

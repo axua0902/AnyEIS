@@ -243,8 +243,10 @@ class MyMplCanvas(FigureCanvas):
                 if i >= len(data) or data[i] is None or len(data[i]) == 0:
                     continue
                 colname = list(data[i].columns)
+                # 列顺序固定为 [FREQ, Z, PHASE, Rs, X]: 画 Rs 必须取 colname[3],
+                # 原 colname[1](Z[ohm]) 画出来是 |Z|, 与标签 "Rs [ohm]" 不符
                 self._plot_curve(
-                    self.axRs, data[i][colname[0]], data[i][colname[1]], dataname[i], i
+                    self.axRs, data[i][colname[0]], data[i][colname[3]], dataname[i], i
                 )
                 has_data = True
             else:

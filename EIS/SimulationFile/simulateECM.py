@@ -12,7 +12,7 @@ import sys
 sys.path.append('..')
 
 from pandas import DataFrame,Series
-from numpy import pi,real,imag,angle
+from numpy import pi,real,imag,angle,absolute
 
 from EIS.ModelFile.EquivCircM import SearchParallel,CalculateParallel,CalculateSeries,expressECM,expressSeriesECM
 from EIS.ModelFile.EquivCircFUN import advanced_circuit_drawing
@@ -49,7 +49,7 @@ def creatdatabaseECM(freq,Z): #############创建结果数据库
     data =DataFrame()
     Z=Series(Z)
     data['FREQ[Hz]']=freq
-    data['Z[ohm]']=Series(real(Z))
+    data['Z[ohm]']=Series(absolute(Z))
     # Phase=arctan(Series(imag(Z))/Series(real(Z)))
     Phase=Series(angle(Z))
     data['PHASE[deg]']=Series(Phase*180/pi)

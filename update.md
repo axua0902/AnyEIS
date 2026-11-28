@@ -152,6 +152,22 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 
 并在 `model_data` 字面量末尾追加：`"parameters": [], "fitting_settings": fitting_settings`（键数 8 → 9）。
 
+### 2.7 数据读取与列语义修复（2026-11-28）
+
+| 项 | 内容 | 状态 |
+|----|------|------|
+| PHASE 单位自检 | `Datacheck.check7_phase_unit`：以 `arctan2(X,Rs)` 为基准判定度/弧度，弧度自动 ×180/π；接入 `readexcelfile` / `readcsvfile` | ✅ 已完成 |
+| PHASE 数据修正 | `TestData` 下 4 个水溶液 xlsx 的 `PHASE[deg]` 列 ×180/π（0.05 两份 + 0.01 + 0.5） | ✅ 已完成 |
+| Z 列口径统一 | `Z[ohm]` 统一为幅值：`simulateECM` / `FittingECM` / `Filterfun` 的 `real(Z)`→`absolute(Z)`；`Plotfun.plotRs` 取列 `colname[1]`→`colname[3]`(Rs) | ✅ 已完成 |
+| Z 一致性自检 | 新增 `Datacheck.check8_z_consistency`：比较 Z 更接近幅值 `hypot(Rs,X)` 还是实部 Rs 的行占比，只告警不改数据 | ✅ 已完成 |
+| Z 数据修正 | `TestData/Fitting/ECM` 下 5 个 ECM xlsx 的 `Z[ohm]` 改为 `hypot(Rs,X)` | ✅ 已完成 |
+| 一般数据列名 | `readexcelfile`：无频率列时视为一般数据、不重命名（如 `Foamat 4.xlsx`）；EIS/DS 按物理列位置重命名并规整为标准列序 | ✅ 已完成 |
+| CSV 列名匹配 | `readcsvfile`：子串匹配改为规范化精确匹配，缺列打印告警而非 `NameError` | ✅ 已完成 |
+| 鲁棒判据 | check7 改用中位比值 + 容差内行占比；check8 改用行占比；单行坏点不再阻断换算或误报（`RC2k...csv` 可正确换算） | ✅ 已完成 |
+| 回归 | `test_check7_phase_unit.py` 12/12；MT smoke 通过；`TestData` 全量 check7/check8 零告警 | ✅ 通过 |
+
+> 未处理（按要求保持原样）：`Data/` 下旧副本仍存在 PHASE 弧度 / `Z=Rs`，加载时由 check7 自动换算、check8 告警，不改动文件本身。
+
 ---
 
 ## 三、新问题记录模板
@@ -187,6 +203,7 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 
 历史条目汇总：Bug 系列 8 条（7 已修复 + Bug #007 Phase 1/2 已修复）、TP 系列 18 条
 （13 已修复 / 2 已解决 / 2 复审撤销或降级 / 3 不修复）、MT 系列 6 条（全部完成）。
+另：2026-11-28 数据读取与列语义系列 9 项已完成（详见 §2.7）。
 **无未决缺陷。**
 
 ---
@@ -207,6 +224,7 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 | 2026-11 | 审稿回复 | 定量评估、交叉校验、酵母实验算例、回复稿与测试资产 | 详见 §2.5 |
 | 2026-11-17 | 文档整理 | 压缩已完成条目细节，补充 CPE / 审稿实施记录与时间线 | |
 | 2026-11-17 | R4 | 模型 JSON 追加 `fitting_settings`（`ECMFunctions.create_ecm_model_json`），旧 JSON 兼容性回归通过 | 详见 §2.6 |
+| 2026-11-28 | 数据读取 | PHASE 单位自检与数据修正、Z 列口径统一、一般数据列名、CSV 精确匹配、check7/8 鲁棒化 | 详见 §2.7 |
 
 ---
 

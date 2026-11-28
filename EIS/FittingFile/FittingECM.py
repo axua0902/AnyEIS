@@ -28,7 +28,7 @@ import contextlib
 from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
-from numpy import pi, real, imag, angle, sqrt
+from numpy import pi, real, imag, angle, sqrt, absolute
 from pandas import DataFrame, Series
 
 from lmfit import Minimizer, Parameters, report_fit
@@ -198,7 +198,7 @@ def creatdatabaseECM(freq,Z): #############创建结果数据库
     data =DataFrame()
     Z=Series(Z)
     data['FREQ[Hz]']=freq
-    data['Z[ohm]']=Series(real(Z))
+    data['Z[ohm]']=Series(absolute(Z))
     # Phase=arctan(Series(imag(Z))/Series(real(Z)))
     Phase=Series(angle(Z))
     data['PHASE[deg]']=Series(Phase*180/pi)

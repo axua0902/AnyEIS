@@ -471,7 +471,7 @@ def creatdatabase(freq,Z): #############创建结果数据库
     data =DataFrame()
     Z=Series(Z)
     data['FREQ[Hz]']=freq
-    data['Z[ohm]']=Series(real(Z))
+    data['Z[ohm]']=Series(absolute(Z))
     Phase=Series(angle(Z))
     data['PHASE[deg]']=Series(Phase*180/pi)
     data['Rs[ohm]']=Series(real(Z))

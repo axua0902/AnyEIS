@@ -299,7 +299,7 @@ def check6_freq_consistency(prodata, refdata, rtol_log=1e-3):
     return 1
 
 
-def check7_phase_unit(df, dataname='', tol_deg=0.05, fix=True):
+def check7_phase_unit(df, dataname='', tol_deg=0.5, fix=True):
     """
     PHASE 列单位自检(弧度/角度) / PHASE column unit self-check
 
@@ -314,14 +314,16 @@ def check7_phase_unit(df, dataname='', tol_deg=0.05, fix=True):
          原地换算 PHASE×180/π 并打印告警
       3. 两者都不符                          -> 仅打印告警
          (PHASE 与 Rs/X 不自洽), 不改动数据
+    单位判定用 PHASE/arctan2 的中位比值 + 容差内行占比(鲁棒统计),
+    个别坏行不会阻断整列换算, 也不会把正常数据误判成弧度。
     缺少 PHASE/Rs/X 列(如介电/通用数据)或有效行 < 2 时静默跳过, 不打扰。
 
     Args:
         df: pandas DataFrame(阻抗数据, 列名支持常见变体, resolve_column 容错匹配)
         dataname: 数据名, 仅用于告警信息
-        tol_deg: 单位判定容差(度)。0.05 可容忍 PHASE 列 2~3 位小数的四舍五入
-                 (实测数据文件 err ≈ 5e-4 度, 弧度文件按度读取 err ≈ 80 度,
-                 两者相距 3 个数量级以上, 阈值取中间偏保守值)
+        tol_deg: 单位判定容差(度)。0.5 可覆盖 3 位有效数字仪器 CSV 由 Rs/X
+                 反推 arctan2 的舍入误差(实测 ~0.1 度); 弧度误存按度读取的
+                 误差 ~80 度, 两者相距两个数量级以上, 不会混淆
         fix: 判定为弧度时是否自动换算为度(默认 True)
 
     Returns:
@@ -353,29 +355,119 @@ def check7_phase_unit(df, dataname='', tol_deg=0.05, fix=True):
         return 'skipped', 'not enough valid rows'
 
     phase_ref_deg = np.degrees(np.arctan2(x[valid], rs[valid]))
-    err_deg = float(np.max(np.abs(phase[valid] - phase_ref_deg)))
-    err_rad = float(np.max(np.abs(np.degrees(phase[valid]) - phase_ref_deg)))
+    ph_valid = phase[valid]
+    err_deg = np.abs(ph_valid - phase_ref_deg)
+    err_rad = np.abs(np.degrees(ph_valid) - phase_ref_deg)
+
+    # 鲁棒判据: 用 PHASE/基准 的"中位比值"判单位(个别坏点不影响中位数),
+    # 再用"容差内行占比"复核; 避免单行坏数据阻断整列换算。
+    mask = (np.abs(phase_ref_deg) >= 0.5) & (np.abs(ph_valid) > 0)
+    if int(np.sum(mask)) >= 3:
+        ratio = float(np.median(ph_valid[mask] / phase_ref_deg[mask]))
+        abs_ratio = abs(ratio)
+    else:
+        ratio = float('nan')
+        abs_ratio = float('nan')
+
+    frac_deg = float(np.mean(err_deg <= tol_deg))
+    frac_rad = float(np.mean(err_rad <= tol_deg))
+
+    if np.isfinite(abs_ratio) and 0.8 <= abs_ratio <= 1.25:
+        is_deg, is_rad = True, False
+    elif np.isfinite(abs_ratio) and 0.010 <= abs_ratio <= 0.030:
+        is_deg, is_rad = False, True
+    elif frac_deg >= 0.9:      # 角度过小、比值不可用时回退到行占比
+        is_deg, is_rad = True, False
+    elif frac_rad >= 0.9:
+        is_deg, is_rad = False, True
+    else:
+        is_deg, is_rad = False, False
 
     # 1) 度: 与基准吻合
-    if err_deg <= tol_deg:
-        return 'ok', f'degrees (err_deg={err_deg:.2e})'
+    if is_deg and frac_deg >= 0.8:
+        return 'ok', f'degrees (frac_ok={frac_deg:.2%})'
 
-    # 2) 弧度: ×180/π 后与基准吻合, 且原值明显不是度
-    if err_rad <= tol_deg and err_deg > 10 * tol_deg:
+    # 2) 弧度: ×180/π 后与基准吻合
+    if is_rad and frac_rad >= 0.8:
         if fix:
             df[ph_col] = df[ph_col] * 180.0 / np.pi
             print(f'[check7] "{dataname}": PHASE column stored in RADIANS '
-                  f'under a [deg] header; auto-converted to degrees (x180/pi)')
-            return 'fixed', f'radians->degrees (err_rad={err_rad:.2e}, err_deg={err_deg:.3f})'
+                  f'under a [deg] header; auto-converted to degrees (x180/pi, '
+                  f'{frac_rad:.1%} rows match)')
+            return 'fixed', f'radians->degrees (frac_ok={frac_rad:.2%})'
         print(f'[check7] WARNING: "{dataname}": PHASE column appears to be '
-              f'in RADIANS (mismatch as degrees: {err_deg:.3f} deg); left unchanged')
+              f'in RADIANS; left unchanged (fix disabled)')
         return 'inconsistent', 'radians detected, fix disabled'
 
     # 3) 两种单位都不吻合: 仅告警, 不改动
     print(f'[check7] WARNING: "{dataname}": PHASE column inconsistent with '
-          f'arctan2(X, Rs) (err_deg={err_deg:.3f} deg, err_rad={err_rad:.3f} deg); '
+          f'arctan2(X, Rs) (frac_deg={frac_deg:.1%}, frac_rad={frac_rad:.1%}, '
+          f'ratio={ratio:.3g}); left unchanged')
+    return 'inconsistent', f'frac_deg={frac_deg:.3f}, frac_rad={frac_rad:.3f}'
+
+
+def check8_z_consistency(df, dataname='', tol_rel=0.05):
+    """
+    Z[ohm] 列一致性自检(幅值 |Z| vs 实部 Re(Z)) / Z column consistency check
+
+    背景: 代码里 Z[ohm] 曾有两套口径——仪器数据/文档/Processingfun 写 |Z|,
+    而 simulateECM / FittingECM / Filterfun 的 creatdatabase 曾写 real(Z),
+    导致 ECM 仿真数据文件的 Z 列恒等于 Rs, 与 |Z| 最大偏差可达 80%。
+    按位置取列的图(如 f-Re(Z) 用 colname[1])会因此对不上。
+
+    判据: 比较 Z 更接近 |Z|=hypot(Rs,X) 还是实部 Rs 的行占比(鲁棒统计);
+    单个坏点不会误报, 而"Z 整列存实部"仍能被抓到。只告警, 不改数据。
+    阈值 5% 可放过 3 位有效数字仪器 CSV 的舍入误差(实测 0.5%~0.9%),
+    又能抓住"Z 写成实部"这类 20%~80% 的错误。
+    缺少 Z/Rs/X 列(介电/通用数据)或有效行 < 2 时静默跳过。
+
+    Returns:
+        (status, info)
+        status ∈ {'ok', 'inconsistent', 'skipped'}
+    """
+    import numpy as np
+
+    if df is None or not hasattr(df, 'columns'):
+        return 'skipped', 'no dataframe'
+
+    z_col = resolve_column(df, ['Z[ohm]', 'Z[OHM]', 'Z[Ω]', 'absZ', 'Z'])
+    rs_col = resolve_column(df, ['Rs[ohm]', 'RS[OHM]', 'Rs', 'R'])
+    x_col = resolve_column(df, ['X[ohm]', 'X[OHM]', 'X'])
+    if z_col is None or rs_col is None or x_col is None:
+        return 'skipped', 'Z/Rs/X columns not found'
+
+    try:
+        z = df[z_col].to_numpy(dtype=float)
+        rs = df[rs_col].to_numpy(dtype=float)
+        x = df[x_col].to_numpy(dtype=float)
+    except (TypeError, ValueError):
+        return 'skipped', 'non-numeric Z/Rs/X'
+
+    valid = np.isfinite(z) & np.isfinite(rs) & np.isfinite(x) & (z > 0)
+    if int(np.sum(valid)) < 2:
+        return 'skipped', 'not enough valid rows'
+
+    # 鲁棒判据: 比较 Z 更接近 |Z|=hypot(Rs,X) 还是更接近实部 Rs 的行占比。
+    # 单个坏点不会改变结论, 而"Z 整列写成实部"即使多数点 |X| 很小也能被抓到。
+    zm = np.abs(np.hypot(rs[valid], x[valid]) - z[valid]) / np.maximum(z[valid], 1e-30)
+    zr = np.abs(rs[valid] - z[valid]) / np.maximum(z[valid], 1e-30)
+    frac_mag = float(np.mean(zm <= tol_rel))
+    frac_real = float(np.mean(zr <= tol_rel))
+
+    if frac_real >= 0.8 and frac_real > frac_mag:
+        print(f'[check8] WARNING: "{dataname}": Z[ohm] matches real(Z)=Rs better than '
+              f'|Z|=hypot(Rs, X) (frac_real={frac_real:.1%}, frac_mag={frac_mag:.1%}); '
+              f'left unchanged')
+        return 'inconsistent', f'frac_real={frac_real:.3f}'
+
+    if frac_mag >= 0.8:
+        return 'ok', (f'Z=|Z| (frac_mag={frac_mag:.1%}, '
+                      f'bad rows={float(np.mean(zm > tol_rel)):.1%})')
+
+    print(f'[check8] WARNING: "{dataname}": Z[ohm] inconsistent with hypot(Rs, X) '
+          f'(median rel err={float(np.median(zm)):.1%}, frac_mag={frac_mag:.1%}); '
           f'left unchanged')
-    return 'inconsistent', f'err_deg={err_deg:.3f}, err_rad={err_rad:.3f}'
+    return 'inconsistent', f'frac_mag={frac_mag:.3f}'
 
 ##################################数据检查#############################
 
