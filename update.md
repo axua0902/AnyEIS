@@ -12,15 +12,16 @@
 ## 一、当前活跃问题
 
 > **2026-09-09**: Bug #007 Phase 1 + Phase 2 已修复（P0 × 1 + P1 × 2）。
-> P0-2 多图合并按用户反馈回退为"只画第一组"；P2 清理项按用户要求暂不处理。
+> P0-2 多图合并按用户反馈回退为"只画第一组"。
+> **2026-11-28**: P2 清理项复核并处理完毕（P2-2 判定为非问题，撤销）。
 
-### 1.1 暂不处理的清理项（Bug #007 P2）
+### 1.1 Bug #007 P2 清理项（2026-11-28 已处理）
 
-| # | 内容 | 状态 |
-|---|------|------|
-| P2-1 | `userdefine5` 中 `self.clearfigure()` 副作用（会重置 `excelnameTextEdit` 时间戳） | ⏸️ 不修 |
-| P2-2 | `np.var/std` 用 `ddof=1` 而 `np.mean` 不指定 ddof 的语义注释 | ⏸️ 不修 |
-| P2-3 | `selected_indices` 在 4 个函数中重复计算（可抽 helper） | ⏸️ 不修 |
+| # | 内容 | 结论 | 状态 |
+|---|------|------|------|
+| P2-1 | `userdefine5` 中 `self.clearfigure()` 副作用（会重置 `excelnameTextEdit` 时间戳） | 两处改用 `_reset_figure_state(self)`，与 userdefine3/4 一致，不再覆盖用户填写的导出文件名 | ✅ 已修复 |
+| P2-2 | `np.var/std` 用 `ddof=1` 而 `np.mean` 不指定 ddof 的语义注释 | `np.mean` 无 ddof 参数，`ddof=1` 为刻意的样本口径，注释已明确 → 非问题 | ✅ 撤销 |
+| P2-3 | `selected_indices` 在 4 个函数中重复计算（可抽 helper） | `Error_stat.py` 抽出 `_selected_indices()`（3 处）；`UserDefineFun.py` 抽出 `_synthetic_selection()` 并让 `_iter_processed_synthetic()` 复用，消除第 4 处重复 | ✅ 已修复 |
 
 ### 1.2 审稿回复相关事项
 
@@ -214,7 +215,8 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 历史条目汇总：Bug 系列 8 条（7 已修复 + Bug #007 Phase 1/2 已修复）、TP 系列 18 条
 （13 已修复 / 2 已解决 / 2 复审撤销或降级 / 3 不修复）、MT 系列 6 条（全部完成）。
 另：2026-11-28 数据读取与列语义系列 9 项已完成（详见 §2.7）；
-2026-11-28 一般/时间序列绘图轴名与测试数据系列 1 项已完成（详见 §2.8）。
+2026-11-28 一般/时间序列绘图轴名与测试数据系列 1 项已完成（详见 §2.8）；
+2026-11-28 Bug #007 P2 清理项 3 项已处理（详见 §1.1）。
 **无未决缺陷。**
 
 ---
@@ -237,6 +239,7 @@ available to support reproducibility"。原模型 JSON 只有电路串与参数�
 | 2026-11-17 | R4 | 模型 JSON 追加 `fitting_settings`（`ECMFunctions.create_ecm_model_json`），旧 JSON 兼容性回归通过 | 详见 §2.6 |
 | 2026-11-28 | 数据读取 | PHASE 单位自检与数据修正、Z 列口径统一、一般数据列名、CSV 精确匹配、check7/8 鲁棒化 | 详见 §2.7 |
 | 2026-11-28 | 绘图 | General/Time order 导出图与应用内绘图轴名改用文件实际表头；新增 8 个一般/时间序列测试数据 | 详见 §2.8 |
+| 2026-11-28 | Bug #007 P2 | 误差计算改用 `_reset_figure_state`；抽出 `_selected_indices` / `_synthetic_selection`；P2-2 撤销 | 详见 §1.1 |
 
 ---
 

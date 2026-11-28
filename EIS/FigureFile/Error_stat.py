@@ -4,6 +4,11 @@ import numpy as np
 import pandas as pd
 
 
+def _selected_indices(outputlist):
+    """返回 outputlist 中标记为选中(1)的索引列表。"""
+    return [i for i, selected in enumerate(outputlist) if selected == 1]
+
+
 def calculate_relative_errors(plotdata, outputlist, plotdataname):
     """
     计算多数据集相对误差分析
@@ -19,7 +24,7 @@ def calculate_relative_errors(plotdata, outputlist, plotdataname):
         - error_stats: 误差统计信息字典
     """
     # 获取选中的数据索引
-    selected_indices = [i for i, selected in enumerate(outputlist) if selected == 1]
+    selected_indices = _selected_indices(outputlist)
 
     if len(selected_indices) <= 1:
         return None, None
@@ -98,7 +103,7 @@ def calculate_statistical_indicators(plotdata, outputlist, plotdataname):
         - stats_summary: 统计摘要信息字典
     """
     # 获取选中的数据索引
-    selected_indices = [i for i, selected in enumerate(outputlist) if selected == 1]
+    selected_indices = _selected_indices(outputlist)
 
     if len(selected_indices) <= 1:
         return None, None
@@ -150,7 +155,7 @@ def calculate_statistical_indicators(plotdata, outputlist, plotdataname):
             min_len = min(len(arr) for arr in all_col_values)
             col_matrix = np.array([arr[:min_len] for arr in all_col_values])
 
-            # 计算统计指标(与原代码一致:std/var 用样本 ddof=1,mean 用总体)
+            # 统计口径:var/std 用 ddof=1(样本标准差),mean 无 ddof 概念,无需对齐
             col_mean = np.mean(col_matrix, axis=0)
             col_var = np.var(col_matrix, axis=0, ddof=1)
             col_std = np.std(col_matrix, axis=0, ddof=1)
@@ -190,7 +195,7 @@ def calculate_single_dataset_statistics(plotdata, outputlist, plotdataname):
         - single_stats_summary: 单数据集统计摘要
     """
     # 获取选中的数据索引
-    selected_indices = [i for i, selected in enumerate(outputlist) if selected == 1]
+    selected_indices = _selected_indices(outputlist)
 
     if len(selected_indices) == 0:
         return None, None

@@ -302,19 +302,37 @@ def _reset_figure_state(self):
                 pass
 
 
-def _iter_processed_synthetic(self):
+def _synthetic_selection(self):
     """
-    遍历 plotdata 中的有效条目,跳过 original 配对,
-    只保留 processed synthetic(避免原始曲线与处理曲线完全重叠)。
+    返回 (filtered_outputlist, selected_indices):
+    filtered_outputlist 与 self.outputlist 等长,仅把"已勾选且为 processed synthetic"
+    的条目置 1(跳过 original 配对),供 Error_stat 系列函数使用。
     注意:不按 id() 去重,同一对的 original 与 synthetic 是不同的 DataFrame 对象,
     仅靠 self.message[i]['synthetic'] 即可完成筛选。
     """
-    for i, data in enumerate(self.plotdata):
-        if data is None:
+    filtered_outputlist = [0] * len(self.outputlist)
+    selected_indices = []
+    for i, flag in enumerate(self.outputlist):
+        if flag != 1:
             continue
         info = self.message[i] if i < len(self.message) else {}
         is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
         if not is_synthetic:
+            continue
+        filtered_outputlist[i] = 1
+        selected_indices.append(i)
+    return filtered_outputlist, selected_indices
+
+
+def _iter_processed_synthetic(self):
+    """
+    遍历已勾选的 processed synthetic 条目,跳过 original 配对
+    (避免原始曲线与处理曲线完全重叠)。
+    """
+    _filtered_outputlist, selected_indices = _synthetic_selection(self)
+    for i in selected_indices:
+        data = self.plotdata[i]
+        if data is None:
             continue
         yield data, self.plotdataname[i], self.outputlist[i]
 
@@ -493,17 +511,7 @@ def userdefine5(self):
         # 构造 synthetic 过滤后的 outputlist
         # 与 userdefine3/4 一致:跳过 original 配对,只保留 processed synthetic,
         # 避免 Original + Processed 同时勾选时把同一对原始/处理曲线纳入对比(relative error ≈ 0 误导)
-        filtered_outputlist = [0] * len(self.outputlist)
-        selected_indices = []
-        for i in range(len(self.outputlist)):
-            if self.outputlist[i] != 1:
-                continue
-            info = self.message[i] if i < len(self.message) else {}
-            is_synthetic = isinstance(info, dict) and info.get('synthetic', False)
-            if not is_synthetic:
-                continue
-            filtered_outputlist[i] = 1
-            selected_indices.append(i)
+        filtered_outputlist, selected_indices = _synthetic_selection(self)
 
         if len(selected_indices) == 0:
             QMessageBox.warning(
@@ -531,8 +539,8 @@ def userdefine5(self):
                 QMessageBox.warning(self, "Warning", "Failed to calculate error analysis!")
                 return
 
-            # 清除之前的图形
-            self.clearfigure()
+            # 清除之前的图形(不动导出文件名,与 userdefine3/4 保持一致)
+            _reset_figure_state(self)
 
             # 绘制多数据集误差分析结果
             plot_multi_dataset_results(self, error_df_list, stats_list, error_stats, stats_summary)
@@ -554,8 +562,8 @@ def userdefine5(self):
                 QMessageBox.warning(self, "Warning", "Invalid dataset or insufficient data points!")
                 return
 
-            # 清除之前的图形
-            self.clearfigure()
+            # 清除之前的图形(不动导出文件名,与 userdefine3/4 保持一致)
+            _reset_figure_state(self)
 
             # 绘制单数据集统计分析结果
             plot_single_dataset_results(self, stats_dfs_list, single_stats_summary, self.plotdataname[selected_indices[0]])
